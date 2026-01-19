@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="USG_Tools.CLI/USG_Tools.CLI.csproj" />
+  <Project Path="USG_Tools.Core/USG_Tools.Core.csproj" />
+</Solution>
