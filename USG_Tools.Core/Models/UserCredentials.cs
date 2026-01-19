@@ -7,13 +7,13 @@ namespace USG_Tools.Core.Models
     // credentials.json
     public class UserCredentials
     {
-        public string Login = string.Empty;
-        public string Password = string.Empty;
-        public bool UseProxy = false;
-        public List<string>? Hosts;
-        public string? ProxyHost;
-        public string? ProxyLogin;
-        public string? ProxyPassword;
+        public string Login { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public bool UseProxy { get; set; } = false;
+        public List<string> Hosts { get; set; } = new List<string>();
+        public string? ProxyHost { get; set; }
+        public string? ProxyLogin { get; set; }
+        public string? ProxyPassword { get; set; }
 
         public bool IsValid (out string errorMessage)
         {
