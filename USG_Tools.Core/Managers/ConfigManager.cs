@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using USG_Tools.Core.Models;
 
 namespace USG_Tools.Core.Managers
@@ -6,7 +7,11 @@ namespace USG_Tools.Core.Managers
     public class ConfigManager
     {
         private readonly string _basePath;
+        private readonly string _appData;
         private readonly string _configFolderPath;
+        private readonly string _secretFolder;
+        private readonly string _secretFilePath;
+        private ILogger _logger;
 
         // Пути к конкретным файлам 
         private string CredentialsPath => Path.Combine(_configFolderPath, "credentials.json");
@@ -14,25 +19,37 @@ namespace USG_Tools.Core.Managers
         // Конфигурации 
         public UserCredentials? Credentials { get; private set; }
 
-        public ConfigManager()
+        public ConfigManager(ILogger logger)
         {
             // 1. Определяем пути
-
-            _basePath = AppDomain.CurrentDomain.BaseDirectory;
+            _logger = logger;
+            _appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            _secretFolder = Path.Combine(_appData, "USG_Tools");
+            _secretFilePath = Path.Combine(_secretFolder, "secrets.json");
+            _basePath = AppContext.BaseDirectory;
             _configFolderPath = Path.Combine(_basePath, "config");
 
-            //2. Создаем папку config, если ее еще нет
+            //2. Создаем папки с конфигами, если их еще нет
+
+            if (!Directory.Exists(_secretFolder))
+            {
+                Directory.CreateDirectory(_secretFolder);
+            }
 
             if (!Directory.Exists(_configFolderPath))
             {
                 Directory.CreateDirectory(_configFolderPath);
             }
 
-            // 3. Загружаем данные (если файлов нет, создаем конструктор конфигурации)
+            // 3. Загружаем данные (если файлов нет, передаем null)
             Credentials = LoadJson<UserCredentials>(CredentialsPath);
 
         }
 
+        /// <summary>
+        /// Обновляет данные объекта UserCredentials и сохраняет в JSON-файл
+        /// </summary>
+        /// <param name="newCredentials">Обновленные данные UserCredentials</param>
         public void UpdateCredentials(UserCredentials newCredentials)
         {
             Credentials = newCredentials;
@@ -69,7 +86,7 @@ namespace USG_Tools.Core.Managers
             catch (Exception ex) 
             {
                 // Если файл битый или возникли проблемы пишем ошибку и возвращаем null 
-                Console.WriteLine($"Возникла ошибка при чтении {path}. Ошибка: {ex.Message}");
+                _logger.LogError($"Возникла ошибка при чтении {path}. Ошибка: {ex.Message}");
                 return null;
             }
         }
@@ -103,7 +120,7 @@ namespace USG_Tools.Core.Managers
             catch (Exception ex)
             {
                 // Если что то пошло не так, выводим ошибку 
-                Console.WriteLine($"Ошибка при сохранении конфига {path}: {ex.Message}");
+                _logger.LogError($"Ошибка при сохранении конфига {path}: {ex.Message}");
             }
         }
     }
