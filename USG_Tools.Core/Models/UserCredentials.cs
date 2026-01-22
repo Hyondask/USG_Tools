@@ -67,8 +67,8 @@ namespace USG_Tools.Core.Models
             sb.AppendLine("--- Профиль пользователя ---")
               .AppendLine($"Login: {Login}")
               .AppendLine($"Password: {Password.MaskSecretData()} ")
-              .Append("Hosts").AppendJoin(',', Hosts).AppendLine()
-              .AppendLine($"Jump Host:{JumpHost}");
+              .Append("Hosts: ").AppendJoin(", ", Hosts).AppendLine()
+              .AppendLine($"Jump Host: {JumpHost}");
             if (JumpHost)
             {
                 sb.AppendLine($"Proxy Host: {ProxyHost}")
