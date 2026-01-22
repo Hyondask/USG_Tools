@@ -1,6 +1,8 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Text;
+using USG_Tools.Core.Extensions;
 
 namespace USG_Tools.Core.Models
 {
@@ -9,11 +11,19 @@ namespace USG_Tools.Core.Models
     {
         public string Login { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
-        public bool UseProxy { get; set; } = false;
+        public bool JumpHost { get; set; } = false;
         public List<string> Hosts { get; set; } = new List<string>();
         public string? ProxyHost { get; set; }
         public string? ProxyLogin { get; set; }
         public string? ProxyPassword { get; set; }
+
+        private ILogger _logger;
+
+        public UserCredentials()
+        {
+
+        }
+
 
         public bool IsValid (out string errorMessage)
         {
@@ -31,7 +41,7 @@ namespace USG_Tools.Core.Models
                 return false;
             }
             // Проверка заполненности данных для подключения к прокси 
-            if (UseProxy)
+            if (JumpHost)
             {
                 if (string.IsNullOrWhiteSpace(ProxyHost) || 
                     string.IsNullOrWhiteSpace (ProxyLogin) ||
@@ -47,5 +57,26 @@ namespace USG_Tools.Core.Models
             return true;
         }
 
+        /// <summary>
+        /// Форматированный вывод свойств класса  
+        /// </summary>
+        /// <returns></returns>
+        public string ToString()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("--- Профиль пользователя ---")
+              .AppendLine($"Login: {Login}")
+              .AppendLine($"Password: {Password.MaskSecretData()} ")
+              .Append("Hosts").AppendJoin(',', Hosts).AppendLine()
+              .AppendLine($"Jump Host:{JumpHost}");
+            if (JumpHost)
+            {
+                sb.AppendLine($"Proxy Host: {ProxyHost}")
+                  .AppendLine($"Proxy Login: {ProxyLogin}")
+                  .AppendLine($"Proxy Password: {ProxyPassword.MaskSecretData()}");
+            }
+            sb.AppendLine("--------------------");
+            return sb.ToString();
+        }
     }
 }

@@ -17,7 +17,7 @@ namespace USG_Tools.Core.Managers
         private string CredentialsPath => Path.Combine(_configFolderPath, "credentials.json");
 
         // Конфигурации 
-        public UserCredentials? Credentials { get; private set; }
+        public UserCredentials? Credentials { get; set; }
 
         public ConfigManager(ILogger logger)
         {
