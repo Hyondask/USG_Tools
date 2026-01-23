@@ -1,4 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using USG_Tools.Core.Models;
 
@@ -13,8 +15,6 @@ namespace USG_Tools.Core.Managers
         private readonly string _secretFilePath;
         private ILogger _logger;
 
-        // Пути к конкретным файлам 
-        private string CredentialsPath => Path.Combine(_configFolderPath, "credentials.json");
 
         // Конфигурации 
         public UserCredentials? Credentials { get; set; }
@@ -48,7 +48,7 @@ namespace USG_Tools.Core.Managers
             // Загружаем учетные данные 
             try
             {
-                Credentials = LoadJson<UserCredentials>(CredentialsPath);
+                Credentials = LoadJson<UserCredentials>(_secretFilePath);
             }
             catch (Exception ex)
             {
@@ -65,7 +65,7 @@ namespace USG_Tools.Core.Managers
             Credentials = newCredentials;
             try
             {
-                SaveJson<UserCredentials>(CredentialsPath, Credentials);
+                SaveJson<UserCredentials>(_secretFilePath, Credentials);
             }
             catch (Exception ex) { throw; }
         }
@@ -79,7 +79,7 @@ namespace USG_Tools.Core.Managers
         /// Возвращает экземпляр типа <typeparamref name="T"/>, если файл успешно прочитан; 
         /// в противном случае (файл не найден, ошибка структуры JSON) возвращает <see langword="null"/>.
         /// </returns>
-        private T? LoadJson<T>(string path) where T : class
+        private UserCredentials LoadJson<T>(string path) where T : class
         {
             // Проверяем существует ли файл 
             if (!File.Exists(path))
@@ -92,16 +92,17 @@ namespace USG_Tools.Core.Managers
                 // Читаем весь текст из файла 
                 string json = File.ReadAllText(path);
 
-                // Дессириализуем json в объект 
-                return JsonSerializer.Deserialize<T>(json);
+                // Дессириализуем json в объект 1
+                var creds = JsonSerializer.Deserialize<UserCredentials>(json);
+                return creds != null ? UnprotectCredentials(creds) : null;
             }
 
-            catch (Exception ex) 
+            catch (Exception ex)
             {
                 // Если файл битый или возникли проблемы пишем ошибку и возвращаем null 
-                string message = $"Возникла ошибка при чтении {path}. Ошибка: {ex.Message}";
-                _logger.LogError(ex.Message);
-                throw new Exception(message, ex);
+                _logger.LogError($"Возникла ошибка при чтении {path}. Ошибка: {ex.Message}");
+                Thread.Sleep(1000);
+                return null;
             }
         }
 
@@ -126,18 +127,119 @@ namespace USG_Tools.Core.Managers
                 {
                     Directory.CreateDirectory(directory);
                 }
+
+                // Перед сериализацией создаем копию объекта и шифруем в нем даннные 
+                var copyCreds = ProtectCredentials();
+
                 // Сериализуем и сохраняем. (Всегда перезаписываем актуальными данными)
                 var options = new JsonSerializerOptions { WriteIndented = true };
-                string json = JsonSerializer.Serialize(obj, options);
+                string json = JsonSerializer.Serialize(copyCreds, options);
                 File.WriteAllText(path, json);
             }
             catch (Exception ex)
             {
                 // Если что то пошло не так, выводим ошибку 
-                string errorMessage = $"Ошибка при сохранении конфига {path}: {ex.Message}";
-                _logger.LogError(errorMessage);
-                throw new Exception(errorMessage, ex);
+                _logger.LogError($"Ошибка при сохранении конфига {path}: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Метод отвечающий за шифрование Учетных данных
+        /// </summary>
+        /// <exception cref="Exception">Пароль пустой </exception>
+        private UserCredentials ProtectCredentials()
+        {
+            var copyCreds = CopyCredentialsInNewObject();
+            if (string.IsNullOrWhiteSpace(copyCreds.Password))
+            {
+                throw new Exception("поле Password пустое");
+            }
+            else
+            {
+                copyCreds.Password = ProtectPasswordWindows(copyCreds.Password);
+            }
+            if (!string.IsNullOrWhiteSpace(copyCreds.ProxyPassword))
+            {
+                copyCreds.ProxyPassword = ProtectPasswordWindows(copyCreds.ProxyPassword);
+            }
+
+            return copyCreds;
+
+        }
+
+        /// <summary>
+        /// Метод дешифровки привязывающийся к профилю пользователя Windows
+        /// </summary>
+        /// <param name="creds">Заполненный класс с зашифрованными паролями</param>
+        /// <returns></returns>
+        private UserCredentials UnprotectCredentials(UserCredentials creds)
+        {
+            if (!string.IsNullOrWhiteSpace(creds.Password))
+            {
+                try
+                {
+                    creds.Password = UnprotectPasswordWindows(creds.Password);
+                }
+
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Ошибка при расшифровке Password. Текст ошибки {ex.ToString()}");
+                }
+            }
+            else
+            {
+                _logger.LogError("Поле Password пустое");
+            }
+
+            if (!string.IsNullOrWhiteSpace(creds.ProxyPassword))
+            {
+                try
+                {
+                    creds.ProxyPassword = UnprotectPasswordWindows(creds.ProxyPassword);
+                }
+
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Ошибка при расшифровке ProxyPassword. Текст ошибки {ex.ToString()}");
+                }
+            }
+            return creds;
+        }
+
+        /// <summary>
+        /// Метод шифрования, привязывающийся к профилю пользователя Windows
+        /// </summary>
+        /// <param name="password"></param>
+        /// <returns>Возвращает зашифрованную строку с паролем</returns>
+        private string ProtectPasswordWindows(string password)
+        {
+            byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+            return Convert.ToBase64String(ProtectedData.Protect(passwordBytes, null, DataProtectionScope.CurrentUser));
+        }
+
+        private string UnprotectPasswordWindows(string password)
+        {
+            byte[] passwordBytes = Convert.FromBase64String(password);
+            return Encoding.UTF8.GetString(ProtectedData.Unprotect(passwordBytes, null, DataProtectionScope.CurrentUser));
+        }
+
+        /// <summary>
+        /// Создание копии класса
+        /// </summary>
+        /// <returns>Возвращает класс дублер </returns>
+        private UserCredentials CopyCredentialsInNewObject()
+        {
+            return new UserCredentials()
+            {
+                Hosts = Credentials.Hosts,
+                Login = Credentials.Login,
+                Password = Credentials.Password,
+                JumpHost = Credentials.JumpHost,
+                ProxyHost = Credentials.ProxyHost,
+                ProxyLogin = Credentials.ProxyLogin,
+                ProxyPassword = Credentials.ProxyPassword
+            };
+
         }
     }
 }
