@@ -1,7 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
-using System.Text;
 using USG_Tools.CLI.Utils;
 using USG_Tools.Core.Managers;
 using USG_Tools.Core.Models;
@@ -12,6 +9,7 @@ namespace USG_Tools.CLI
     {
         private readonly ConfigManager _configManager;
         private readonly ILogger _logger;
+        private string _lastErrorMessage;
         public Menu(ConfigManager configManager, ILogger menulogger)
         {
             _configManager = configManager;
@@ -21,9 +19,20 @@ namespace USG_Tools.CLI
         // --- ТОЧКА ВХОДА ---
         public async Task RunAsync()
         {
+            try
+            {
+                _configManager.init();
+            }
+            catch (Exception ex)
+            {
+                _lastErrorMessage = ex.Message;
+                _logger.LogWarning($"Конфиг поврежден: ex.Message. Запуск мастера...");
+                await RunSetup();
+            } 
             while (true)
             {
                 Console.Clear();
+                ShowError();
                 Console.WriteLine("========================================");
                 Console.WriteLine("        HUAWEI USG HELPER TOOL          ");
                 Console.WriteLine("========================================");
@@ -79,6 +88,7 @@ namespace USG_Tools.CLI
                 while (true)
                 {
                     ShowCredentials();
+                    ShowError();
                     Console.WriteLine("1. Вызвать мастер настройки");
                     Console.WriteLine("2. Изменить УЗ для подключения");
                     Console.WriteLine("3. Изменить УЗ для Прокси");
@@ -144,6 +154,18 @@ namespace USG_Tools.CLI
             Console.Write("Адрес прокси сервера: ");
             _configManager.Credentials.ProxyHost = ConsoleUtils.GetIp();
         }
-        
+
+        private async Task ShowError()
+        {
+            if (!string.IsNullOrEmpty(_lastErrorMessage))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($" >>> [ВНИМАНИЕ]: {_lastErrorMessage}");
+                Console.ResetColor();
+                Console.WriteLine("---------------------------------------");
+                _lastErrorMessage = string.Empty;
+            }
+        }
+
     }
 }

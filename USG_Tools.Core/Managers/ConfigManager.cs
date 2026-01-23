@@ -41,9 +41,19 @@ namespace USG_Tools.Core.Managers
                 Directory.CreateDirectory(_configFolderPath);
             }
 
-            // 3. Загружаем данные (если файлов нет, передаем null)
-            Credentials = LoadJson<UserCredentials>(CredentialsPath);
+        }
 
+        public void init()
+        {
+            // Загружаем учетные данные 
+            try
+            {
+                Credentials = LoadJson<UserCredentials>(CredentialsPath);
+            }
+            catch (Exception ex)
+            {
+                throw;
+            }
         }
 
         /// <summary>
@@ -53,8 +63,11 @@ namespace USG_Tools.Core.Managers
         public void UpdateCredentials(UserCredentials newCredentials)
         {
             Credentials = newCredentials;
-            SaveJson<UserCredentials>(CredentialsPath, Credentials);
-
+            try
+            {
+                SaveJson<UserCredentials>(CredentialsPath, Credentials);
+            }
+            catch (Exception ex) { throw; }
         }
 
         /// <summary>
@@ -86,8 +99,9 @@ namespace USG_Tools.Core.Managers
             catch (Exception ex) 
             {
                 // Если файл битый или возникли проблемы пишем ошибку и возвращаем null 
-                _logger.LogError($"Возникла ошибка при чтении {path}. Ошибка: {ex.Message}");
-                return null;
+                string message = $"Возникла ошибка при чтении {path}. Ошибка: {ex.Message}";
+                _logger.LogError(ex.Message);
+                throw new Exception(message, ex);
             }
         }
 
@@ -120,7 +134,9 @@ namespace USG_Tools.Core.Managers
             catch (Exception ex)
             {
                 // Если что то пошло не так, выводим ошибку 
-                _logger.LogError($"Ошибка при сохранении конфига {path}: {ex.Message}");
+                string errorMessage = $"Ошибка при сохранении конфига {path}: {ex.Message}";
+                _logger.LogError(errorMessage);
+                throw new Exception(errorMessage, ex);
             }
         }
     }
