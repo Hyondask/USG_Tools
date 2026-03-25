@@ -9,9 +9,10 @@ namespace USG_Tools.CLI.Utils
     {
 
         /// <summary>
-        /// Заполнение строки с закрытими данными
+        /// Заполнение строки с чувствтительными данными.
+        /// Прячет введенные пользователем символы 
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Возвращает <see cref="string"/> с заполненными данными от клиента </returns>
         public static string ReadSecret()
         {
             var sb = new StringBuilder();
@@ -36,6 +37,11 @@ namespace USG_Tools.CLI.Utils
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Обязательное заполнение строки.
+        /// При вводе пустой строки выход из метода не произойдет
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> с заполненными данными от клиента</returns>
         public static string GetNotEmptyString()
         {
             string data = string.Empty;
@@ -50,6 +56,11 @@ namespace USG_Tools.CLI.Utils
             return data;
         }
 
+        /// <summary>
+        /// Метод, интерпретирующий ответ y/n как True/False
+        /// Выводит y/n в консоль и ждет ввода пользователя
+        /// </summary>
+        /// <returns> Возвращает <see cref="bool"/> ответ пользователя <see langword="true"/>/<see langword="false"/> "/></returns>
         public static bool GetYesOrNo()
         {
             while (true)
@@ -62,7 +73,11 @@ namespace USG_Tools.CLI.Utils
                 }
             }
         }
-
+        /// <summary>
+        /// Принимает строку клиента и проверяет является ли строка ip адресом или нет
+        /// Если строка не является IP адресом, то просит клиента ввести IP Адрес
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> Валидный Ip адрес</returns>
         public static string GetIp()
         {
             while (true)
@@ -78,6 +93,11 @@ namespace USG_Tools.CLI.Utils
             }
 
         }
+        /// <summary>
+        /// Принимает от клиента список IP адресов с проверкой IP адреса на подлинность. В строке принимает по одному адресу
+        /// Завершает сбор при вводе пустой строки
+        /// </summary>
+        /// <returns></returns>
         public static List<string> GetIpList()
         {
             List<string> iplist = new List<string>();
@@ -98,12 +118,22 @@ namespace USG_Tools.CLI.Utils
             }
             return iplist;
         }
+        /// <summary>
+        /// Проверка, является ли указанный символ специальным символом
+        /// </summary>
+        /// <param name="keyInfo">Символ для проверки</param>
+        /// <returns>Возвращает <see cref="bool" /></returns>
         private static bool CheckSpecialKeys(ConsoleKeyInfo keyInfo)
         {
             if (char.IsControl(keyInfo.KeyChar)) { return true; }
             return false;
         }
 
+        /// <summary>
+        /// Метод для удаление последнего символа из строки
+        /// </summary>
+        /// <param name="sb"> <see cref="StringBuilder"/> строка</param>
+        /// <returns><see cref="StringBuilder"/> строка без последнего символа</returns>
         private static StringBuilder RemoveLastKey(StringBuilder sb)
         {
             if (sb.Length > 0)

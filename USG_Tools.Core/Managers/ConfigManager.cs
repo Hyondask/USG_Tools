@@ -45,6 +45,9 @@ namespace USG_Tools.Core.Managers
 
         }
 
+        /// <summary>
+        /// Чтение УЗ из json файла 
+        /// </summary>
         public void init()
         {
             // Загружаем учетные данные 
@@ -72,6 +75,10 @@ namespace USG_Tools.Core.Managers
             catch (Exception ex) { throw; }
         }
 
+        /// <summary>
+        /// Чтение маппинга зон из Json файла
+        /// </summary>
+        /// <returns></returns>
         public Dictionary<string, ZoneMapping> LoadZoneMappings()
         {
             string path = Path.Combine(_zonemappingFilePath);

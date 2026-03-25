@@ -238,7 +238,7 @@ namespace USG_Tools.CLI
     {
         static async Task Main(string[] args)
         {
-
+            SQLitePCL.Batteries.Init();
             // Берем конфигурацию логера из json 
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
@@ -296,6 +296,7 @@ namespace USG_Tools.CLI
     <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.2" />
   </ItemGroup>
 
   <ItemGroup>
@@ -450,6 +451,7 @@ namespace USG_Tools.CLI.Utils
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.72" />
     <PackageReference Include="IPNetwork2" Version="3.4.853" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.2" />
@@ -467,6 +469,14 @@ namespace USG_Tools.CLI.Utils
       <HintPath>References\Hyondask.SSH.dll</HintPath>
     </Reference>
   </ItemGroup>
+
+  <ItemGroup>
+    <None Update="configs\zone_mappings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ProjectExtensions><VisualStudio><UserProperties /></VisualStudio></ProjectExtensions>
 
 </Project>
 
@@ -611,7 +621,7 @@ namespace USG_Tools.Core.Managers
             _secretFolder = Path.Combine(_appData, "USG_Tools");
             _secretFilePath = Path.Combine(_secretFolder, "secrets.json");
             _basePath = AppContext.BaseDirectory;
-            _configFolderPath = Path.Combine(_basePath, "config");
+            _configFolderPath = Path.Combine(_basePath, "configs");
             _zonemappingFilePath = Path.Combine(_configFolderPath, "zone_mappings.json");
 
             //2. Создаем папки с конфигами, если их еще нет
@@ -658,7 +668,12 @@ namespace USG_Tools.Core.Managers
         public Dictionary<string, ZoneMapping> LoadZoneMappings()
         {
             string path = Path.Combine(_zonemappingFilePath);
-            if (!File.Exists(path)) return new Dictionary<string, ZoneMapping>();
+            if (!File.Exists(path))
+            {
+                _logger.LogError("не найден файл {file}", _zonemappingFilePath);
+                return new Dictionary<string, ZoneMapping>();
+            }
+
 
             string json = File.ReadAllText(path);
             return JsonSerializer.Deserialize<Dictionary<string, ZoneMapping>>(json)
@@ -844,21 +859,43 @@ namespace USG_Tools.Core.Managers
 ФАЙЛ: USG_Tools.Core\Managers\DatabaseManager.cs
 ==================================================
 
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using Dapper;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
+using USG_Tools.Core.Models;
 
 namespace USG_Tools.Core.Managers
 {
     public class DatabaseManager
     {
         private readonly string _connectionString;
+        private readonly ILogger<DatabaseManager> _logger;
 
-        public DatabaseManager(string dbPath)
+
+        public DatabaseManager(string dbPath, ILogger<DatabaseManager> logger)
         {
             // dbPath получим из ConfigManager
             _connectionString = $"Data Source={dbPath}";
+            _logger = logger;
+            EnsureTableCreated();
+        }
+
+
+        public void EnsureTableCreated()
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+            connection.Execute(@"
+        CREATE TABLE IF NOT EXISTS Routes (
+            ip_min INTEGER,
+            ip_max INTEGER,
+            cidr TEXT,
+            route TEXT,
+            zone TEXT,
+            interface_name TEXT,
+            zone_in TEXT,
+            zone_out TEXT
+        );");
         }
 
         public void InitializeDatabase()
@@ -887,6 +924,47 @@ namespace USG_Tools.Core.Managers
             CREATE INDEX IF NOT EXISTS idx_routes_ips ON routes(start_ip, end_ip);
         ";
             command.ExecuteNonQuery();
+        }
+        public async Task BulkSaveRoutesAsync(List<FinalRoute> routes)
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            // Начинаем транзакцию
+            using var transaction = await connection.BeginTransactionAsync();
+
+            try
+            {
+                // 1. Очищаем таблицу перед вставкой новых данных
+                // В SQLite TRUNCATE нет, используется DELETE без WHERE (это работает быстро)
+                await connection.ExecuteAsync("DELETE FROM Routes", transaction: transaction);
+
+                // 2. SQL запрос для вставки
+                const string sql = @"
+            INSERT INTO Routes (
+                ip_min, ip_max, cidr, route, zone, 
+                interface_name, zone_in, zone_out
+            ) VALUES (
+                @ip_min, @ip_max, @cidr, @route, @zone, 
+                @interface_name, @zone_in, @zone_out
+            );";
+
+                // 3. Массовая вставка данных
+                await connection.ExecuteAsync(sql, routes, transaction: transaction);
+
+                // Если всё прошло успешно — фиксируем изменения
+                await transaction.CommitAsync();
+
+                _logger.LogInformation($"БД очищена и заполнена заново: {routes.Count} записей.");
+            }
+            catch (Exception ex)
+            {
+                // Если что-то пошло не так (например, выключился свет или ошибка в SQL)
+                // Rollback вернет БД в состояние ДО начала очистки.
+                await transaction.RollbackAsync();
+                _logger.LogError($"Ошибка транзакции. БД не была изменена. Детали: {ex.Message}");
+                throw;
+            }
         }
     }
 }
@@ -930,16 +1008,46 @@ namespace USG_Tools.Core.Managers
 
         public async Task UpdateDatabase()
         {
-            var usgAnswer = await GetRoutesAndZonesAsync();
+            // 1. Загружаем конфиг один раз
+            var zoneMapping = _configManager.LoadZoneMappings();
 
-            foreach (var answer in usgAnswer)
+            // 2. Получаем сырые данные от всех USG
+            var usgAnswers = await GetRoutesAndZonesAsync();
+
+            // 3. Создаем один общий список для всей сети
+            var allFinalRoutes = new List<FinalRoute>();
+
+            var _databaseManager = new DatabaseManager("zone_ip.sqlite", _loggerFactory.CreateLogger<DatabaseManager>());
+
+            foreach (var answer in usgAnswers)
             {
-                routes.AddRange(USGParser.ParseRoutes(answer.Routes));
-                zones.AddRange(USGParser.ParseZones(answer.Zones));
-                var zonerules = _configManager.LoadZoneMappings();
-                var finalRoute = PrepareDatabaseEntries(routes, zones);
+                _logger.LogInformation($"Парсинг данных для хоста: {answer.Host}");
 
+                // Парсим текущий хост
+                var currentRoutes = USGParser.ParseRoutes(answer.Routes);
+                var currentZones = USGParser.ParseZones(answer.Zones);
 
+                // Превращаем в FinalRoute и добавляем в общий котел
+                var finalEntries = PrepareDatabaseEntries(currentRoutes, currentZones, zoneMapping);
+                allFinalRoutes.AddRange(finalEntries);
+            }
+
+            // 4. Когда цикл завершен и у нас есть данные ВСЕХ хостов — пишем в БД
+            if (allFinalRoutes.Count > 0)
+            {
+                _logger.LogInformation($"Начинаю сохранение в БД. Всего записей: {allFinalRoutes.Count}");
+
+                // Группируем по cidr и zone, оставляя только первую встреченную запись
+                var cleanRoutes = allFinalRoutes
+                    .DistinctBy(r => new { r.cidr, r.zone })
+                    .ToList();
+
+                // Теперь сохраняем уже чистый список
+                await _databaseManager.BulkSaveRoutesAsync(cleanRoutes);
+            }
+            else
+            {
+                _logger.LogWarning("Нет данных для сохранения в БД.");
             }
         }
         private async Task<List<HostDiscoveryResult>> GetRoutesAndZonesAsync() 
@@ -989,24 +1097,37 @@ namespace USG_Tools.Core.Managers
             return finalData;
         }
 
-        private static List<FinalRoute> PrepareDatabaseEntries(List<RouteEntry> routes, List<ZoneEntry> zones)
+        private static List<FinalRoute> PrepareDatabaseEntries(
+            List<RouteEntry> routes,
+            List<ZoneEntry> zones,
+            Dictionary<string, ZoneMapping> zoneConfigs)
         {
-            // Создаем маппинг Интерфейс -> Зона для быстрой склейки
             var interfaceMap = zones
                 .SelectMany(z => z.Interfaces.Select(i => new { i, z.Name }))
-                .ToLookup(x => x.i, x => x.Name)
-                .ToDictionary(g => g.Key, g => g.First());
+                .ToDictionary(x => x.i.Trim(), x => x.Name.Trim(), StringComparer.OrdinalIgnoreCase);
 
-            return routes.Select(r => new FinalRoute(
-                ip_min: r.minIp,
-                ip_max: r.maxIp,
-                cidr: r.Destination,
-                route: r.NextHop,
-                zone: interfaceMap.TryGetValue(r.Interface, out var zName) ? zName : "Unknown",
-                interface_name: r.Interface
-            )).ToList();
+            // Создаем копию конфига с игнорированием регистра для надежности
+            var rules = new Dictionary<string, ZoneMapping>(zoneConfigs, StringComparer.OrdinalIgnoreCase);
+
+            return routes.Select(r =>
+            {
+                string zoneName = interfaceMap.TryGetValue(r.Interface.Trim(), out var zName) ? zName : "Unknown";
+
+                // Поиск правила в JSON
+                var mapping = rules.GetValueOrDefault(zoneName, new ZoneMapping { In = "Unknown_In", Out = "Unknown_Out" });
+
+                return new FinalRoute(
+                    ip_min: r.minIp,
+                    ip_max: r.maxIp,
+                    cidr: r.Destination,
+                    route: r.NextHop,
+                    zone: zoneName,
+                    interface_name: r.Interface,
+                    zone_in: mapping.In,
+                    zone_out: mapping.Out
+                );
+            }).ToList();
         }
-
 
         private async Task SaveDataToFileAsync(string host, string zones, string routes)
         {

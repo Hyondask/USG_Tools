@@ -7,7 +7,19 @@ using USG_Tools.Core.Parsers;
 
 namespace USG_Tools.Core.Managers
 {
+    /// <summary>
+    /// Представляет сырые текстовые данные, полученные от конкретного узла (межсетевого экрана).
+    /// </summary>
+    /// <param name="Host">IP-адрес или имя хоста.</param>
+    /// <param name="Zones">Сырой текст вывода команды просмотра зон безопасности.</param>
+    /// <param name="Routes">Сырой текст вывода таблицы маршрутизации.</param>
     public record HostDiscoveryResult(string Host, string Zones, string Routes);
+
+    /// <summary>
+    /// Главный оркестратор процесса сбора данных (Discovery).
+    /// Отвечает за координацию подключения к устройствам, парсинг сырых данных, 
+    /// обогащение их правилами из конфигурации и передачу на сохранение в базу данных.
+    /// </summary>
     public class DiscoveryManager
     {
         private readonly ConfigManager _configManager;
@@ -21,6 +33,12 @@ namespace USG_Tools.Core.Managers
 
         private USGManager usg;
 
+        /// <summary>
+        /// Инициализирует новый экземпляр класса <see cref="DiscoveryManager"/>.
+        /// </summary>
+        /// <param name="configManager">Менеджер конфигурации для получения учетных данных и правил маппинга.</param>
+        /// <param name="loggerFactory">Фабрика логгеров для создания логгеров внутренних компонентов.</param>
+        /// <exception cref="ArgumentNullException">Выбрасывается, если фабрика логгеров или учетные данные не инициализированы.</exception>
         public DiscoveryManager(ConfigManager configManager, ILoggerFactory loggerFactory)
         {
             // Проверка на null
@@ -30,6 +48,18 @@ namespace USG_Tools.Core.Managers
             _logger = _loggerFactory.CreateLogger<DiscoveryManager>();
         }
 
+        /// <summary>
+        /// Запускает полный цикл обновления базы данных.
+        /// </summary>
+        /// <remarks>
+        /// Процесс включает:
+        /// 1. Параллельный сбор сырых данных со всех устройств из конфигурации.
+        /// 2. Парсинг текста в объекты C#.
+        /// 3. Склейку маршрутов с зонами и маппинг групп In/Out из JSON.
+        /// 4. Удаление дубликатов (схлопывание по сети и зоне).
+        /// 5. Транзакционную перезапись таблицы в базе данных SQLite.
+        /// </remarks>
+        /// <returns>Асинхронная задача.</returns>
         public async Task UpdateDatabase()
         {
             // 1. Загружаем конфиг один раз
@@ -74,7 +104,13 @@ namespace USG_Tools.Core.Managers
                 _logger.LogWarning("Нет данных для сохранения в БД.");
             }
         }
-        private async Task<List<HostDiscoveryResult>> GetRoutesAndZonesAsync() 
+
+        /// <summary>
+        /// Асинхронно и параллельно подключается ко всем устройствам из конфигурации
+        /// для сбора таблиц маршрутизации и зон безопасности.
+        /// </summary>
+        /// <returns>Возвращает <see cref="List{T}"/> объектов <see cref="HostDiscoveryResult"/> с сырыми данными опрошенных узлов.</returns>
+        private async Task<List<HostDiscoveryResult>> GetRoutesAndZonesAsync()
         {
             var hostlist = _userCredentials.Hosts;
 
@@ -101,7 +137,7 @@ namespace USG_Tools.Core.Managers
 
                     _logger.LogInformation($"[DONE] {host}: Файл записан.");
 
-                    return new HostDiscoveryResult(host,zonesRaw,routesRaw);
+                    return new HostDiscoveryResult(host, zonesRaw, routesRaw);
                 }
                 catch (Exception ex)
                 {
@@ -121,6 +157,14 @@ namespace USG_Tools.Core.Managers
             return finalData;
         }
 
+        /// <summary>
+        /// Сопоставляет спарсенные маршруты и зоны по имени интерфейса, 
+        /// а также обогащает их родительскими группами (In/Out) из конфигурации JSON.
+        /// </summary>
+        /// <param name="routes">Список маршрутов, полученных от парсера.</param>
+        /// <param name="zones">Список зон безопасности, полученных от парсера.</param>
+        /// <param name="zoneConfigs">Словарь правил маппинга зон, загруженный из конфигурационного файла.</param>
+        /// <returns>Готовый к записи в БД список объектов <see cref="FinalRoute"/>.</returns>
         private static List<FinalRoute> PrepareDatabaseEntries(
             List<RouteEntry> routes,
             List<ZoneEntry> zones,
@@ -153,6 +197,14 @@ namespace USG_Tools.Core.Managers
             }).ToList();
         }
 
+        /// <summary>
+        /// Сохраняет сырые ответы от устройства в текстовый файл для аудита или отладки.
+        /// </summary>
+        /// <param name="host">Имя или IP-адрес узла.</param>
+        /// <param name="zones">Сырой текст ответа для зон.</param>
+        /// <param name="routes">Сырой текст ответа для маршрутов.</param>
+        /// <returns>Асинхронная задача сохранения файла.</returns>
+        /// <remarks>Файлы сохраняются в директорию <c>Output/YYYY-MM-DD/IP_Адрес.txt</c>.</remarks>
         private async Task SaveDataToFileAsync(string host, string zones, string routes)
         {
             try

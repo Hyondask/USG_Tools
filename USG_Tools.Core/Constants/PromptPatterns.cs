@@ -4,6 +4,10 @@ using System.Text;
 
 namespace USG_Tools.Core.Constants
 {
+
+    /// <summary>
+    /// Паттерны RegExp выражений
+    /// </summary>
     public static class PromptPatterns
     {
         // Ищем [ЛюбоеИмя] в конце строки

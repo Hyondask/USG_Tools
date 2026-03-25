@@ -5,12 +5,21 @@ using USG_Tools.Core.Models;
 
 namespace USG_Tools.Core.Managers
 {
+    /// <summary>
+    /// Управляет подключением и взаимодействием с локальной базой данных SQLite.
+    /// Отвечает за создание таблиц и массовую запись данных.
+    /// </summary>
     public class DatabaseManager
     {
         private readonly string _connectionString;
         private readonly ILogger<DatabaseManager> _logger;
 
-
+        /// <summary>
+        /// Инициализирует новый экземпляр класса <see cref="DatabaseManager"/>.
+        /// При инициализации автоматически проверяет и создает необходимую структуру БД.
+        /// </summary>
+        /// <param name="dbPath">Путь к файлу базы данных SQLite.</param>
+        /// <param name="logger">Интерфейс для логирования операций с базой данных.</param>
         public DatabaseManager(string dbPath, ILogger<DatabaseManager> logger)
         {
             // dbPath получим из ConfigManager
@@ -19,7 +28,13 @@ namespace USG_Tools.Core.Managers
             EnsureTableCreated();
         }
 
-
+        /// <summary>
+        /// Проверяет наличие таблицы <c>Routes</c> в базе данных и создает её, если она отсутствует.
+        /// </summary>
+        /// <remarks>
+        /// Таблица содержит обогащенные данные по маршрутам и зонам.
+        /// Вызов выполняется синхронно через Dapper при создании менеджера.
+        /// </remarks>
         public void EnsureTableCreated()
         {
             using var connection = new SqliteConnection(_connectionString);
@@ -37,33 +52,17 @@ namespace USG_Tools.Core.Managers
         );");
         }
 
-        public void InitializeDatabase()
-        {
-            using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
 
-            var command = connection.CreateCommand();
-            command.CommandText = @"
-            CREATE TABLE IF NOT EXISTS routes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                network TEXT,
-                start_ip INTEGER,
-                end_ip INTEGER,
-                interface TEXT,
-                host TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS zones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                interface TEXT,
-                zone_name TEXT,
-                host TEXT
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_routes_ips ON routes(start_ip, end_ip);
-        ";
-            command.ExecuteNonQuery();
-        }
+        /// <summary>
+        /// Выполняет массовое сохранение списка маршрутов в базу данных.
+        /// </summary>
+        /// <param name="routes">Список объектов <see cref="FinalRoute"/>, подготовленных для записи.</param>
+        /// <returns>Представляет асинхронную операцию.</returns>
+        /// <exception cref="SqliteException">Выбрасывается при ошибках выполнения SQL-запросов (например, при блокировке файла).</exception>
+        /// <remarks>
+        /// <para>Перед вставкой новых данных таблица <c>Routes</c> полностью очищается (выполняется <c>DELETE</c>).</para>
+        /// <para>Вся операция завернута в транзакцию. В случае ошибки транзакция откатывается (<c>Rollback</c>), и старые данные сохраняются.</para>
+        /// </remarks>
         public async Task BulkSaveRoutesAsync(List<FinalRoute> routes)
         {
             using var connection = new SqliteConnection(_connectionString);

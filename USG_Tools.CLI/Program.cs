@@ -8,6 +8,11 @@ namespace USG_Tools.CLI
 {
     class Program
     {
+        /// <summary>
+        /// Точка старта программы
+        /// </summary>
+        /// <param name="args">Аргументы, при вызове командной строки</param>
+        /// <returns></returns>
         static async Task Main(string[] args)
         {
             SQLitePCL.Batteries.Init();

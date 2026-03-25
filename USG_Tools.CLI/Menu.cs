@@ -5,6 +5,9 @@ using USG_Tools.Core.Models;
 
 namespace USG_Tools.CLI
 {
+    /// <summary>
+    /// Точка старта работы с программой конечным пользователем. Управляет навигацией и связывает UI с Core 
+    /// </summary>
     public class Menu
     {
         private readonly ConfigManager _configManager;
@@ -20,7 +23,10 @@ namespace USG_Tools.CLI
             _logger = _loggerFactory.CreateLogger<Menu>();
         }
 
-        // --- ТОЧКА ВХОДА ---
+        /// <summary>
+        /// Главный цикл приложения (Main Loop)
+        /// </summary>
+        /// <returns></returns>
         public async Task RunAsync()
         {
             try
@@ -60,7 +66,10 @@ namespace USG_Tools.CLI
             }
         }
 
-        // --- ПОДМЕНЮ ---
+        /// <summary>
+        /// Сбор данных маршрутизации в SQLite
+        /// </summary>
+        /// <returns></returns>
 
         private async Task ShowDiscoveryMenu()
         {
@@ -70,10 +79,6 @@ namespace USG_Tools.CLI
             var discovery = new DiscoveryManager(_configManager, _loggerFactory);
             await discovery.UpdateDatabase();
 
-            //Выполняем запросы
-            //usg.Connect("10.7.219.11");
-
-            //USGManager usg = new USGManager(_configManager.Credentials, _loggerFactory.CreateLogger<USGManager>());
             Console.WriteLine("\nНажмите любую клавишу для возврата...");
             Console.ReadKey();
         }   
@@ -121,14 +126,19 @@ namespace USG_Tools.CLI
 
 
         }
-
+        /// <summary>
+        /// Отображение УЗ в консоль
+        /// </summary>
+        /// <returns></returns>
         private async Task ShowCredentials()
         {
             Console.WriteLine(_configManager.Credentials.ToString());
         }
 
-        //--- Мастер настройки учетных данных --- 
-
+        /// <summary>
+        /// Мастер настройки УЗ 
+        /// </summary>
+        /// <returns></returns>
         private async Task SetupMaster()
         {
             _configManager.Credentials = new UserCredentials();
@@ -136,6 +146,10 @@ namespace USG_Tools.CLI
             _configManager.UpdateCredentials(_configManager.Credentials);
         }
 
+        /// <summary>
+        /// Меню настройки основных учетных данных
+        /// </summary>
+        /// <returns></returns>
         private async Task MainCredentialsSetup()
         {
             Console.WriteLine("===Настройка учетных данных===");
@@ -154,6 +168,10 @@ namespace USG_Tools.CLI
 
         }
 
+        /// <summary>
+        /// Меню настройки учетных данных для подключения к Proxy
+        /// </summary>
+        /// <returns></returns>
         private async Task ProxyCredentialsSetup()
         {
             Console.WriteLine("===Настройка данных прокси===");
@@ -165,6 +183,10 @@ namespace USG_Tools.CLI
             _configManager.Credentials.ProxyHost = ConsoleUtils.GetIp();
         }
 
+        /// <summary>
+        /// Отображение ошибок, если имеются
+        /// </summary>
+        /// <returns></returns>
         private async Task ShowError()
         {
             if (!string.IsNullOrEmpty(_lastErrorMessage))
