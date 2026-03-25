@@ -1,0 +1,1431 @@
+=== СТРУКТУРА ПРОЕКТА ===
+./
+    .github/
+        workflows/
+    USG_Tools.CLI/
+        Menu.cs
+        Program.cs
+        USG_Tools.CLI.csproj
+        Utils/
+            ConsoleUtils.cs
+    USG_Tools.Core/
+        USG_Tools.Core.csproj
+        configs/
+        Constants/
+            PromptPatterns.cs
+        Extensions/
+            NetworkExtensions.cs
+            StringExtensions.cs
+        Managers/
+            ConfigManager.cs
+            DatabaseManager.cs
+            DiscoveryManager.cs
+            USGManager.cs
+        Models/
+            FinalRoute.cs
+            RouteEntry.cs
+            UserCredentials.cs
+            ZoneEntry.cs
+            ZoneMapping.cs
+        Parsers/
+            USGParser.cs
+        Properties/
+
+
+=== СОДЕРЖИМОЕ ФАЙЛОВ ===
+
+
+==================================================
+ФАЙЛ: USG_Tools.CLI\Menu.cs
+==================================================
+
+﻿using Microsoft.Extensions.Logging;
+using USG_Tools.CLI.Utils;
+using USG_Tools.Core.Managers;
+using USG_Tools.Core.Models;
+
+namespace USG_Tools.CLI
+{
+    public class Menu
+    {
+        private readonly ConfigManager _configManager;
+        private readonly ILogger _logger;
+        private readonly ILoggerFactory _loggerFactory;
+        private string _lastErrorMessage;
+        public Menu(ConfigManager configManager, ILoggerFactory loggerFactory)
+        {
+            // Проверка на null
+            _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+            _configManager = configManager ?? throw new ArgumentNullException(nameof(configManager));
+
+            _logger = _loggerFactory.CreateLogger<Menu>();
+        }
+
+        // --- ТОЧКА ВХОДА ---
+        public async Task RunAsync()
+        {
+            try
+            {
+                _configManager.init();
+            }
+            catch (Exception ex)
+            {
+                _lastErrorMessage = ex.Message;
+                _logger.LogWarning($"Конфиг поврежден: ex.Message. Запуск мастера...");
+                await RunSetup();
+            } 
+            while (true)
+            {
+                Console.Clear();
+                ShowError();
+                Console.WriteLine("========================================");
+                Console.WriteLine("        HUAWEI USG HELPER TOOL          ");
+                Console.WriteLine("========================================");
+                Console.WriteLine("2. Поиск зоны по IP адресу");
+                Console.WriteLine("8. Настройки (Credentials/Proxy)");
+                Console.WriteLine("9. Обновление БД");
+                Console.WriteLine("0. Выход");
+                Console.WriteLine("========================================");
+                Console.Write("\nВыберите действие: ");
+
+                switch (Console.ReadLine())
+                {
+                    case "8": await RunSetup(); break;
+                    case "9": await ShowDiscoveryMenu(); break;
+                    case "0": return;
+                    default:
+                        Console.WriteLine("❌ Неверный ввод...");
+                        Thread.Sleep(1000);
+                        break;
+                }
+            }
+        }
+
+        // --- ПОДМЕНЮ ---
+
+        private async Task ShowDiscoveryMenu()
+        {
+            Console.Clear();
+            Console.WriteLine(">>> ЗАПУСК СБОРА ДАННЫХ");
+
+            var discovery = new DiscoveryManager(_configManager, _loggerFactory);
+            await discovery.UpdateDatabase();
+
+            //Выполняем запросы
+            //usg.Connect("10.7.219.11");
+
+            //USGManager usg = new USGManager(_configManager.Credentials, _loggerFactory.CreateLogger<USGManager>());
+            Console.WriteLine("\nНажмите любую клавишу для возврата...");
+            Console.ReadKey();
+        }   
+
+
+        // --- Технические функции ----
+
+        /// <summary>
+        /// Меню для обновления учетных данных для доступа на оборудование.
+        /// Запрашивает данные, после сохраняет в json 
+        /// </summary>
+        /// <returns></returns>
+        private async Task RunSetup()
+        {
+            Console.Clear();
+            Console.WriteLine("=== НАСТРОЙКА УЧЕТНЫХ ДАННЫХ ===");
+
+            // Если конфиг уже был, можем показать текущите значения (изменения)
+            if (_configManager.Credentials != null)
+            {
+
+                while (true)
+                {
+                    ShowCredentials();
+                    ShowError();
+                    Console.WriteLine("1. Вызвать мастер настройки");
+                    Console.WriteLine("2. Изменить УЗ для подключения");
+                    Console.WriteLine("3. Изменить УЗ для Прокси");
+                    Console.WriteLine("0. Выход");
+                    Console.Write("Выберите действие");
+                    switch (Console.ReadLine())
+                    {
+                        case "1": { SetupMaster(); break; }
+                        case "2": { MainCredentialsSetup(); _configManager.UpdateCredentials(_configManager.Credentials); break;  }
+                        case "3": { ProxyCredentialsSetup(); _configManager.UpdateCredentials(_configManager.Credentials); break; }
+                        case "0": { return; }
+                    }
+                }
+            }
+            // Если нет, создаем новый объект и сохраняем его в Json-файл 
+            else
+            {
+                await SetupMaster();
+            }
+
+
+        }
+
+        private async Task ShowCredentials()
+        {
+            Console.WriteLine(_configManager.Credentials.ToString());
+        }
+
+        //--- Мастер настройки учетных данных --- 
+
+        private async Task SetupMaster()
+        {
+            _configManager.Credentials = new UserCredentials();
+            MainCredentialsSetup();
+            _configManager.UpdateCredentials(_configManager.Credentials);
+        }
+
+        private async Task MainCredentialsSetup()
+        {
+            Console.WriteLine("===Настройка учетных данных===");
+            Console.Write("Логин: ");
+            _configManager.Credentials.Login = ConsoleUtils.GetNotEmptyString();
+            Console.Write("Пароль: ");
+            _configManager.Credentials.Password = ConsoleUtils.ReadSecret();
+            Console.Write("Укажите список IP USG (одна строка, 1 ip)");
+            _configManager.Credentials.Hosts = ConsoleUtils.GetIpList();
+            Console.Write("Включить SSH_JumpHost (Bastion) ");
+            _configManager.Credentials.JumpHost = ConsoleUtils.GetYesOrNo();
+            if (_configManager.Credentials.JumpHost)
+            {
+                ProxyCredentialsSetup();
+            }
+
+        }
+
+        private async Task ProxyCredentialsSetup()
+        {
+            Console.WriteLine("===Настройка данных прокси===");
+            Console.Write("Логин: ");
+            _configManager.Credentials.ProxyLogin = ConsoleUtils.GetNotEmptyString();
+            Console.Write("Пароль: ");
+            _configManager.Credentials.ProxyPassword = ConsoleUtils.ReadSecret();
+            Console.Write("Адрес прокси сервера: ");
+            _configManager.Credentials.ProxyHost = ConsoleUtils.GetIp();
+        }
+
+        private async Task ShowError()
+        {
+            if (!string.IsNullOrEmpty(_lastErrorMessage))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($" >>> [ВНИМАНИЕ]: {_lastErrorMessage}");
+                Console.ResetColor();
+                Console.WriteLine("---------------------------------------");
+                _lastErrorMessage = string.Empty;
+            }
+        }
+
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.CLI\Program.cs
+==================================================
+
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using USG_Tools.Core.Managers;
+
+namespace USG_Tools.CLI
+{
+    class Program
+    {
+        static async Task Main(string[] args)
+        {
+
+            // Берем конфигурацию логера из json 
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(AppContext.BaseDirectory)
+                .AddJsonFile("LogSettings.json", optional: false, reloadOnChange: true)
+                .Build();
+
+            // Настройка Serilog
+            Log.Logger = new LoggerConfiguration()
+                .ReadFrom.Configuration(configuration)
+                .CreateLogger();
+            try
+            {
+                // 3. Настройка DI-контейнера (если используешь) или LoggerFactory
+                using var loggerFactory = LoggerFactory.Create(builder =>
+                {
+                    builder.AddSerilog(); // Используем Serilog под капотом Microsoft Logging
+                });
+
+                // 4. Создание зависимостей
+                var configLogger = loggerFactory.CreateLogger<ConfigManager>();
+                var configManager = new ConfigManager(configLogger);
+
+                var menuLogger = loggerFactory.CreateLogger<Menu>();
+                var menu = new Menu(configManager, loggerFactory);
+
+                // 5. Запуск
+                await menu.RunAsync();
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "Приложение аварийно завершилось");
+            }
+            finally
+            {
+                Log.CloseAndFlush();
+            }
+        }
+    }
+}
+
+==================================================
+ФАЙЛ: USG_Tools.CLI\USG_Tools.CLI.csproj
+==================================================
+
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\USG_Tools.Core\USG_Tools.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration.FileExtensions" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.2" />
+    <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="LogSettings.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
+
+
+==================================================
+ФАЙЛ: USG_Tools.CLI\Utils\ConsoleUtils.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Text;
+
+namespace USG_Tools.CLI.Utils
+{
+    public class ConsoleUtils
+    {
+
+        /// <summary>
+        /// Заполнение строки с закрытими данными
+        /// </summary>
+        /// <returns></returns>
+        public static string ReadSecret()
+        {
+            var sb = new StringBuilder();
+
+            while (true)
+            {
+                var key = Console.ReadKey(true);
+                if (key.Key == ConsoleKey.Enter) { Console.WriteLine(); break; }
+
+                if (key.Key == ConsoleKey.Backspace)
+                {
+                    RemoveLastKey(sb); continue;
+                }  // Удаление символа при нажатии backspace 
+                if (!CheckSpecialKeys(key))
+                {
+                    sb.Append(key.KeyChar);
+                    Console.Write('*');
+                }
+
+            }
+
+            return sb.ToString();
+        }
+
+        public static string GetNotEmptyString()
+        {
+            string data = string.Empty;
+            while (true)
+            {
+                data = Console.ReadLine();
+                if (!string.IsNullOrWhiteSpace(data))
+                {
+                    break;
+                }
+            }
+            return data;
+        }
+
+        public static bool GetYesOrNo()
+        {
+            while (true)
+            {
+                Console.Write("y/n");
+                switch (Console.ReadLine().ToLower())
+                {
+                    case "y": return true;
+                    case "n": return false;
+                }
+            }
+        }
+
+        public static string GetIp()
+        {
+            while (true)
+            {
+                string ip = Console.ReadLine();
+                if (!string.IsNullOrWhiteSpace(ip))
+                {
+                    if (IPAddress.TryParse(ip, out IPAddress ipaddress))
+                    {
+                        return ipaddress.ToString();
+                    }
+                }
+            }
+
+        }
+        public static List<string> GetIpList()
+        {
+            List<string> iplist = new List<string>();
+            if (iplist.Count == 0)
+            {
+                while (true)
+                {
+                    string ip = Console.ReadLine();
+                    if (!string.IsNullOrWhiteSpace(ip))
+                    {
+                        if (IPAddress.TryParse(ip, out IPAddress ipaddress))
+                        {
+                            iplist.Add(ipaddress.ToString());
+                        }
+                    }
+                    else { break; }
+                }
+            }
+            return iplist;
+        }
+        private static bool CheckSpecialKeys(ConsoleKeyInfo keyInfo)
+        {
+            if (char.IsControl(keyInfo.KeyChar)) { return true; }
+            return false;
+        }
+
+        private static StringBuilder RemoveLastKey(StringBuilder sb)
+        {
+            if (sb.Length > 0)
+            {
+                sb.Remove(sb.Length - 1, 1);
+                Console.Write("\b \b");
+            }
+            return sb;
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\USG_Tools.Core.csproj
+==================================================
+
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="IPNetwork2" Version="3.4.853" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.2" />
+    <PackageReference Include="SSH.NET" Version="2025.1.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="References\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Hyondask.SSH">
+      <HintPath>References\Hyondask.SSH.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Constants\PromptPatterns.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Constants
+{
+    public static class PromptPatterns
+    {
+        // Ищем [ЛюбоеИмя] в конце строки
+        public const string SystemView = @"\[.*\]\s*$";
+
+        // Ищем -INSIDE перед > или ] в конце строки
+        public const string InsideVsys = @"-INSIDE[>\]]\s*$";
+
+        // Ищем <ЛюбоеИмя> в конце строки (User View)
+        public const string UserView = @"<.*?>\s*$";
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Extensions\NetworkExtensions.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Text;
+using System.Net;
+
+
+namespace USG_Tools.Core.Extensions
+{
+    public static class NetworkExtensions
+    {
+        /// <summary>
+        /// Преобразует IPAddress в беззнаковое целое 32-бит.
+        /// Учитывает порядок байтов (Big Endian -> Little Endian).
+        /// </summary>
+        public static uint ToUint(this IPAddress ipAddress)
+        {
+            var bytes = ipAddress.GetAddressBytes();
+
+            // Если архитектура процессора Little Endian (Windows/Linux x64), 
+            // переворачиваем массив байтов из сетевого порядка.
+            if (BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(bytes);
+            }
+
+            return BitConverter.ToUInt32(bytes, 0);
+        }
+
+        /// <summary>
+        /// Принимает строку вида "10.0.0.0/8" и возвращает границы диапазона в uint.
+        /// </summary>
+        /// <param name="cidr">Строка адреса с маской</param>
+        /// <returns>Кортеж (StartIp, EndIp)</returns>
+        public static (uint StartIp, uint EndIp) GetUintRange(string cidr)
+        {
+            try
+            {
+                var network = IPNetwork2.Parse(cidr);
+
+                // Используем Network (первый адрес) и Broadcast (последний адрес)
+                uint start = network.Network.ToUint();
+                uint end = network.Broadcast.ToUint();
+
+                return (start, end);
+            }
+            catch (Exception)
+            {
+                // Если парсинг не удался (битая строка), возвращаем нули
+                return (0, 0);
+            }
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Extensions\StringExtensions.cs
+==================================================
+
+﻿namespace USG_Tools.Core.Extensions
+{
+    public static class StringExtensions
+    {
+        public static string MaskSecretData(this string str)
+        {
+            if (string.IsNullOrEmpty(str))
+            {
+                return "Empty";
+            }
+            return new string('*', 10);
+        }
+
+    }
+
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Managers\ConfigManager.cs
+==================================================
+
+﻿using Microsoft.Extensions.Logging;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using USG_Tools.Core.Models;
+
+namespace USG_Tools.Core.Managers
+{
+    public class ConfigManager
+    {
+        private readonly string _basePath;
+        private readonly string _appData;
+        private readonly string _configFolderPath;
+        private readonly string _secretFolder;
+        private readonly string _secretFilePath;
+        private readonly string _zonemappingFilePath;
+        private ILogger _logger;
+
+
+        // Конфигурации 
+        public UserCredentials? Credentials { get; set; }
+
+        public ConfigManager(ILogger logger)
+        {
+            // 1. Определяем пути
+            _logger = logger;
+            _appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            _secretFolder = Path.Combine(_appData, "USG_Tools");
+            _secretFilePath = Path.Combine(_secretFolder, "secrets.json");
+            _basePath = AppContext.BaseDirectory;
+            _configFolderPath = Path.Combine(_basePath, "config");
+            _zonemappingFilePath = Path.Combine(_configFolderPath, "zone_mappings.json");
+
+            //2. Создаем папки с конфигами, если их еще нет
+
+            if (!Directory.Exists(_secretFolder))
+            {
+                Directory.CreateDirectory(_secretFolder);
+            }
+
+            if (!Directory.Exists(_configFolderPath))
+            {
+                Directory.CreateDirectory(_configFolderPath);
+            }
+
+        }
+
+        public void init()
+        {
+            // Загружаем учетные данные 
+            try
+            {
+                Credentials = LoadJson<UserCredentials>(_secretFilePath);
+            }
+            catch (Exception ex)
+            {
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Обновляет данные объекта UserCredentials и сохраняет в JSON-файл
+        /// </summary>
+        /// <param name="newCredentials">Обновленные данные UserCredentials</param>
+        public void UpdateCredentials(UserCredentials newCredentials)
+        {
+            Credentials = newCredentials;
+            try
+            {
+                SaveJson<UserCredentials>(_secretFilePath, Credentials);
+            }
+            catch (Exception ex) { throw; }
+        }
+
+        public Dictionary<string, ZoneMapping> LoadZoneMappings()
+        {
+            string path = Path.Combine(_zonemappingFilePath);
+            if (!File.Exists(path)) return new Dictionary<string, ZoneMapping>();
+
+            string json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<Dictionary<string, ZoneMapping>>(json)
+                   ?? new Dictionary<string, ZoneMapping>();
+        }
+
+        /// <summary>
+        /// Загружает данные из JSON-файла и десериализует их в объект указанного типа 
+        /// </summary>
+        /// <typeparam name="T">Тип объекта в который десериализуются  данные(должен быть ссылочным типом)</typeparam>
+        /// <param name="path">Относительный, или абсолютный путь к Json-файлу</param>
+        /// <returns>
+        /// Возвращает экземпляр типа <typeparamref name="T"/>, если файл успешно прочитан; 
+        /// в противном случае (файл не найден, ошибка структуры JSON) возвращает <see langword="null"/>.
+        /// </returns>
+        private UserCredentials LoadJson<T>(string path) where T : class
+        {
+            // Проверяем существует ли файл 
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            try
+            {
+                // Читаем весь текст из файла 
+                string json = File.ReadAllText(path);
+
+                // Дессириализуем json в объект 1
+                var creds = JsonSerializer.Deserialize<UserCredentials>(json);
+                return creds != null ? UnprotectCredentials(creds) : null;
+            }
+
+            catch (Exception ex)
+            {
+                // Если файл битый или возникли проблемы пишем ошибку и возвращаем null 
+                _logger.LogError($"Возникла ошибка при чтении {path}. Ошибка: {ex.Message}");
+                Thread.Sleep(1000);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Сериализует указанный объект в JSON-формат и сохраняет его в файл.
+        /// </summary>
+        /// <param name="path">Относительный или абсолютный путь к файлу</param>
+        /// <param name="obj">Объект, который сериализуется в json </param>
+        /// <remarks>
+        /// Данные сохраняются с использованием форматирования (отступов) для удобства чтения человеком.
+        /// Если файл по указанному пути уже существует, он будет перезаписан.
+        /// </remarks>
+        private void SaveJson<T>(string path, T obj) where T : class
+        {
+            try
+            {
+                // Получаем путь к папке {из пути к файлу 
+                string? directory = Path.GetDirectoryName(path);
+
+                // Если папка указана и ее нет, создаём ее 
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                // Перед сериализацией создаем копию объекта и шифруем в нем даннные 
+                var copyCreds = ProtectCredentials();
+
+                // Сериализуем и сохраняем. (Всегда перезаписываем актуальными данными)
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                string json = JsonSerializer.Serialize(copyCreds, options);
+                File.WriteAllText(path, json);
+            }
+            catch (Exception ex)
+            {
+                // Если что то пошло не так, выводим ошибку 
+                _logger.LogError($"Ошибка при сохранении конфига {path}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Метод отвечающий за шифрование Учетных данных
+        /// </summary>
+        /// <exception cref="Exception">Пароль пустой </exception>
+        private UserCredentials ProtectCredentials()
+        {
+            var copyCreds = CopyCredentialsInNewObject();
+            if (string.IsNullOrWhiteSpace(copyCreds.Password))
+            {
+                throw new Exception("поле Password пустое");
+            }
+            else
+            {
+                copyCreds.Password = ProtectPasswordWindows(copyCreds.Password);
+            }
+            if (!string.IsNullOrWhiteSpace(copyCreds.ProxyPassword))
+            {
+                copyCreds.ProxyPassword = ProtectPasswordWindows(copyCreds.ProxyPassword);
+            }
+
+            return copyCreds;
+
+        }
+
+        /// <summary>
+        /// Метод дешифровки привязывающийся к профилю пользователя Windows
+        /// </summary>
+        /// <param name="creds">Заполненный класс с зашифрованными паролями</param>
+        /// <returns></returns>
+        private UserCredentials UnprotectCredentials(UserCredentials creds)
+        {
+            if (!string.IsNullOrWhiteSpace(creds.Password))
+            {
+                try
+                {
+                    creds.Password = UnprotectPasswordWindows(creds.Password);
+                }
+
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Ошибка при расшифровке Password. Текст ошибки {ex.ToString()}");
+                }
+            }
+            else
+            {
+                _logger.LogError("Поле Password пустое");
+            }
+
+            if (!string.IsNullOrWhiteSpace(creds.ProxyPassword))
+            {
+                try
+                {
+                    creds.ProxyPassword = UnprotectPasswordWindows(creds.ProxyPassword);
+                }
+
+                catch (Exception ex)
+                {
+                    _logger.LogError($"Ошибка при расшифровке ProxyPassword. Текст ошибки {ex.ToString()}");
+                }
+            }
+            return creds;
+        }
+
+        /// <summary>
+        /// Метод шифрования, привязывающийся к профилю пользователя Windows
+        /// </summary>
+        /// <param name="password"></param>
+        /// <returns>Возвращает зашифрованную строку с паролем</returns>
+        private string ProtectPasswordWindows(string password)
+        {
+            byte[] passwordBytes = Encoding.UTF8.GetBytes(password);
+            return Convert.ToBase64String(ProtectedData.Protect(passwordBytes, null, DataProtectionScope.CurrentUser));
+        }
+
+        private string UnprotectPasswordWindows(string password)
+        {
+            byte[] passwordBytes = Convert.FromBase64String(password);
+            return Encoding.UTF8.GetString(ProtectedData.Unprotect(passwordBytes, null, DataProtectionScope.CurrentUser));
+        }
+
+        /// <summary>
+        /// Создание копии класса
+        /// </summary>
+        /// <returns>Возвращает класс дублер </returns>
+        private UserCredentials CopyCredentialsInNewObject()
+        {
+            return new UserCredentials()
+            {
+                Hosts = Credentials.Hosts,
+                Login = Credentials.Login,
+                Password = Credentials.Password,
+                JumpHost = Credentials.JumpHost,
+                ProxyHost = Credentials.ProxyHost,
+                ProxyLogin = Credentials.ProxyLogin,
+                ProxyPassword = Credentials.ProxyPassword
+            };
+
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Managers\DatabaseManager.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+using Microsoft.Data.Sqlite;
+
+namespace USG_Tools.Core.Managers
+{
+    public class DatabaseManager
+    {
+        private readonly string _connectionString;
+
+        public DatabaseManager(string dbPath)
+        {
+            // dbPath получим из ConfigManager
+            _connectionString = $"Data Source={dbPath}";
+        }
+
+        public void InitializeDatabase()
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+
+            var command = connection.CreateCommand();
+            command.CommandText = @"
+            CREATE TABLE IF NOT EXISTS routes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                network TEXT,
+                start_ip INTEGER,
+                end_ip INTEGER,
+                interface TEXT,
+                host TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS zones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interface TEXT,
+                zone_name TEXT,
+                host TEXT
+            );
+            
+            CREATE INDEX IF NOT EXISTS idx_routes_ips ON routes(start_ip, end_ip);
+        ";
+            command.ExecuteNonQuery();
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Managers\DiscoveryManager.cs
+==================================================
+
+﻿using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using USG_Tools.Core.Models;
+using USG_Tools.Core.Parsers;
+
+namespace USG_Tools.Core.Managers
+{
+    public record HostDiscoveryResult(string Host, string Zones, string Routes);
+    public class DiscoveryManager
+    {
+        private readonly ConfigManager _configManager;
+        private readonly UserCredentials _userCredentials;
+
+        private readonly ILoggerFactory _loggerFactory;
+        private readonly ILogger<DiscoveryManager> _logger;
+
+        private List<RouteEntry> routes = new List<RouteEntry>();
+        private List<ZoneEntry> zones = new List<ZoneEntry>();
+
+        private USGManager usg;
+
+        public DiscoveryManager(ConfigManager configManager, ILoggerFactory loggerFactory)
+        {
+            // Проверка на null
+            _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+            _configManager = configManager;
+            _userCredentials = configManager.Credentials ?? throw new ArgumentNullException(nameof(configManager.Credentials));
+            _logger = _loggerFactory.CreateLogger<DiscoveryManager>();
+        }
+
+        public async Task UpdateDatabase()
+        {
+            var usgAnswer = await GetRoutesAndZonesAsync();
+
+            foreach (var answer in usgAnswer)
+            {
+                routes.AddRange(USGParser.ParseRoutes(answer.Routes));
+                zones.AddRange(USGParser.ParseZones(answer.Zones));
+                var zonerules = _configManager.LoadZoneMappings();
+                var finalRoute = PrepareDatabaseEntries(routes, zones);
+
+
+            }
+        }
+        private async Task<List<HostDiscoveryResult>> GetRoutesAndZonesAsync() 
+        {
+            var hostlist = _userCredentials.Hosts;
+
+            var tasks = hostlist.Select(async host =>
+            {
+                try
+                {
+                    // СОЗДАЕМ ЛОКАЛЬНУЮ ПЕРЕМЕННУЮ, чтобы не было конфликтов между потоками
+                    var usg = new USGManager(_userCredentials, _loggerFactory.CreateLogger<USGManager>());
+
+                    await usg.Connect(host);
+
+                    await usg.UndoScreenLength();
+                    await usg.GoToSystemView();
+                    await usg.SwitchVsysInside();
+
+                    string zonesRaw = await usg.GetInsideZones();
+                    string routesRaw = await usg.GetInsideRoutes();
+
+                    _logger.LogInformation($"[SUCCESS] {host}: Данные получены.");
+
+                    // ВЫЗОВ СОХРАНЕНИЯ
+                    await SaveDataToFileAsync(host, zonesRaw, routesRaw);
+
+                    _logger.LogInformation($"[DONE] {host}: Файл записан.");
+
+                    return new HostDiscoveryResult(host,zonesRaw,routesRaw);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError($"[FAILED] {host}: {ex.Message}");
+                    return null;
+                }
+            });
+
+            // Ожидаем получения зон и маршрутов от всех хостов. Формируем массив record
+            HostDiscoveryResult?[] results = await Task.WhenAll(tasks);
+
+            // 3. Фильтруем успешные (убираем null) и превращаем в итоговый список
+            List<HostDiscoveryResult> finalData = results.Where(r => r != null).Cast<HostDiscoveryResult>().ToList();
+
+            _logger.LogInformation($"Сбор завершен. В списке объектов: {finalData.Count}");
+
+            return finalData;
+        }
+
+        private static List<FinalRoute> PrepareDatabaseEntries(List<RouteEntry> routes, List<ZoneEntry> zones)
+        {
+            // Создаем маппинг Интерфейс -> Зона для быстрой склейки
+            var interfaceMap = zones
+                .SelectMany(z => z.Interfaces.Select(i => new { i, z.Name }))
+                .ToLookup(x => x.i, x => x.Name)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            return routes.Select(r => new FinalRoute(
+                ip_min: r.minIp,
+                ip_max: r.maxIp,
+                cidr: r.Destination,
+                route: r.NextHop,
+                zone: interfaceMap.TryGetValue(r.Interface, out var zName) ? zName : "Unknown",
+                interface_name: r.Interface
+            )).ToList();
+        }
+
+
+        private async Task SaveDataToFileAsync(string host, string zones, string routes)
+        {
+            try
+            {
+                // Создаем имя папки с текущей датой
+                string folderName = Path.Combine("Output", DateTime.Now.ToString("yyyy-MM-dd"));
+                Directory.CreateDirectory(folderName); // Создаст папку, если её нет
+
+                // Подготавливаем содержимое файла
+                StringBuilder sb = new StringBuilder();
+                sb.AppendLine($"=== HOST: {host} ===");
+                sb.AppendLine($"=== DATE: {DateTime.Now} ===");
+                sb.AppendLine("\n--- ZONES ---");
+                sb.AppendLine(zones ?? "No data");
+                sb.AppendLine("\n--- ROUTES ---");
+                sb.AppendLine(routes ?? "No data");
+
+                // Формируем имя файла (заменяем недопустимые символы в IP/имени хоста)
+                string safeHostName = host.Replace(":", "_").Replace("/", "_");
+                string filePath = Path.Combine(folderName, $"{safeHostName}.txt");
+
+                // Асинхронная запись
+                await File.WriteAllTextAsync(filePath, sb.ToString());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Ошибка при сохранении файла для {host}: {ex.Message}");
+            }
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Managers\USGManager.cs
+==================================================
+
+﻿using Hyondask.SSH;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using USG_Tools.Core.Models;
+using USG_Tools.Core.Constants;
+
+namespace USG_Tools.Core.Managers
+{
+    public class USGManager
+    {
+        private readonly UserCredentials _userCredentials;
+
+        private readonly ILogger<USGManager> _logger;
+
+        private SshConnection ssh;
+
+        public USGManager (UserCredentials userCredentials, ILogger<USGManager> logger = null)
+        {
+            _userCredentials = userCredentials;
+            _logger = logger ?? NullLogger<USGManager>.Instance;
+
+            _logger.LogDebug("USGManager инициализирован (используется {LoggerType})", _logger.GetType().Name);
+        }
+
+
+
+        public async Task Connect(string host)
+        {
+            ssh = new SshConnection(host, _userCredentials.Login, _userCredentials.Password);
+
+            if (_userCredentials.JumpHost)
+            {
+                ssh.SetProxy(_userCredentials.ProxyHost, _userCredentials.ProxyLogin, _userCredentials.ProxyPassword);
+            }
+            ssh.Prompts.Add(PromptPatterns.UserView); // User-view Prompt (">")
+            ssh.Prompts.Add(PromptPatterns.SystemView); // System-view Prompt ("]")
+
+            await ssh.ConnectAsync();
+        }
+
+        public async Task<string> GetInsideRoutes()
+        {
+            return await ExecuteCommandInVsysAsync("display ip routing-table | exclude ([0-9\\.]\\/32|[0-9\\.]\\/30|Eth.*\\.400|NULL0|0\\.0\\.0\\.0\\/0|Virtual\\-if)", TimeSpan.FromSeconds(20));
+        }
+
+        public async Task<string> GetInsideZones()
+        {
+            return await ExecuteCommandInVsysAsync("display zone", TimeSpan.FromSeconds(30));
+        }
+
+        // Вспомогательный метод, чтобы не дублировать проверки во всех Get... методах
+        private async Task<string> ExecuteCommandInVsysAsync(string command, TimeSpan timeout)
+        {
+            if (!ssh.IsConnected) return null;
+
+            // Проверяем, что мы именно в INSIDE (чтобы не выполнить команду в чужом контексте)
+            if (await CheckPromptAsync(PromptPatterns.InsideVsys))
+            {
+                // Добавляем перенос строки, иначе команда не уйдет!
+                await ssh.SendDataAsync(command + Environment.NewLine);
+                return await ssh.ReadDataAsync(timeout);
+            }
+
+            _logger.LogError($"Ошибка выполнения '{command}': устройство не в режиме INSIDE.");
+            return null;
+        }
+
+        public async Task UndoScreenLength()
+        {
+            _logger.LogDebug ($"{nameof(UndoScreenLength)}");
+            
+            bool isConnected = ssh.IsConnected;
+            bool userView = await CheckPromptAsync(PromptPatterns.UserView);
+            if (isConnected && userView)
+            {
+                await ssh.SendDataAsync("screen-len 0 temp" + Environment.NewLine);
+                await ssh.ReadDataAsync(TimeSpan.FromSeconds(1));
+            }
+            else
+            {
+                _logger.LogError($"{nameof(UndoScreenLength)} | Возникла ошибка. isConnected = {isConnected} | userView = {userView}");
+            }
+
+
+        }
+        public async Task GoToSystemView()
+        {
+            _logger.LogDebug($"{nameof(GoToSystemView)}");
+            bool isConnected = ssh.IsConnected;
+            bool userView = await CheckPromptAsync(PromptPatterns.UserView);
+            if (isConnected && userView)
+            {
+                await ssh.SendDataAsync("System-view" + Environment.NewLine);
+                await ssh.ReadDataAsync(TimeSpan.FromSeconds(1));
+            }
+            else
+            {
+                _logger.LogError($"{nameof(GoToSystemView)} | Возникла ошибка. isConnected = {isConnected} | userView = {userView}");
+            }
+        }
+
+        public async Task SwitchVsysInside()
+        {
+            _logger.LogDebug($"{nameof(SwitchVsysInside)}");
+            bool isConnected = ssh.IsConnected;
+            bool systemView = await CheckPromptAsync(PromptPatterns.SystemView);
+            if (isConnected && systemView)
+            {
+                await ssh.SendDataAsync("switch vsys INSIDE");
+                await ssh.ReadDataAsync(TimeSpan.FromSeconds(1));
+            }
+            else
+            {
+                _logger.LogError($"{nameof(SwitchVsysInside)} | Возникла ошибка. isConnected = {isConnected} | systemView = {systemView}");
+            }
+        }
+
+        public async Task<bool> CheckPromptAsync(string pattern)
+        {
+            await ssh.SendDataAsync(Environment.NewLine);
+            string reply = await ssh.ReadDataAsync(TimeSpan.FromSeconds(2));
+            return Regex.IsMatch(reply.Trim(), pattern, RegexOptions.Multiline);
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\FinalRoute.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    public record FinalRoute(
+        uint ip_min,
+        uint ip_max,
+        string cidr,     // Например, "10.1.0.0/16"
+        string route,    // NextHop (например, "10.0.8.66")
+        string zone,     // Имя зоны (например, "TEMP_CORE_AUP")
+        string interface_name,
+        string zone_in,
+        string zone_out
+    );
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\RouteEntry.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    public record RouteEntry(
+        uint minIp,
+        uint maxIp,
+        string Destination,
+        string Protocol,
+        int Preference,
+        int Cost,
+        string Flags,
+        string NextHop,
+        string Interface
+    );
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\UserCredentials.cs
+==================================================
+
+﻿using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Text;
+using USG_Tools.Core.Extensions;
+
+
+namespace USG_Tools.Core.Models
+{
+    public class UserCredentials
+    {
+        public string Login { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public bool JumpHost { get; set; } = false;
+        public List<string> Hosts { get; set; } = new List<string>();
+        public string? ProxyHost { get; set; }
+        public string? ProxyLogin { get; set; }
+        public string? ProxyPassword { get; set; }
+
+        private ILogger _logger;
+
+        public UserCredentials()
+        {
+
+        }
+
+
+        public bool IsValid (out string errorMessage)
+        {
+            // Проверка наличия основных данных (Логин и пароль)
+            if (string.IsNullOrEmpty (Login) || string.IsNullOrEmpty (Password) )
+            {
+                errorMessage = "Не заполнены основные учетные данные (Логин/Пароль).";
+                return false;
+            }
+            
+            // Проверка наличия хостов для подключения
+            if (Hosts == null || Hosts.Count == 0)
+            {
+                errorMessage = "Список устройств (Hosts) пуст.";
+                return false;
+            }
+            // Проверка заполненности данных для подключения к прокси 
+            if (JumpHost)
+            {
+                if (string.IsNullOrWhiteSpace(ProxyHost) || 
+                    string.IsNullOrWhiteSpace (ProxyLogin) ||
+                    string.IsNullOrWhiteSpace(ProxyPassword) ) 
+                    {
+                    errorMessage = "Включен прокси, но данные прокси-сервера заполнены не полностью.";
+                    return false;
+                    }
+
+            }
+            //Все проверки выполнены, возвращаем true 
+            errorMessage = string.Empty;
+            return true;
+        }
+
+        /// <summary>
+        /// Форматированный вывод свойств класса  
+        /// </summary>
+        /// <returns></returns>
+        public string ToString()
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("--- Профиль пользователя ---")
+              .AppendLine($"Login: {Login}")
+              .AppendLine($"Password: {Password.MaskSecretData()} ")
+              .Append("Hosts: ").AppendJoin(", ", Hosts).AppendLine()
+              .AppendLine($"Jump Host: {JumpHost}");
+            if (JumpHost)
+            {
+                sb.AppendLine($"Proxy Host: {ProxyHost}")
+                  .AppendLine($"Proxy Login: {ProxyLogin}")
+                  .AppendLine($"Proxy Password: {ProxyPassword.MaskSecretData()}");
+            }
+            sb.AppendLine("--------------------");
+            return sb.ToString();
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\ZoneEntry.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    public record ZoneEntry(string Name, List<string> Interfaces);
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\ZoneMapping.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    public class ZoneMapping
+    {
+        public string In { get; set; }
+        public string Out { get; set; }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Parsers\USGParser.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Net.NetworkInformation;
+using System.Text;
+using System.Text.RegularExpressions;
+using USG_Tools.Core.Extensions;
+using USG_Tools.Core.Models;
+
+namespace USG_Tools.Core.Parsers
+{
+    public static class USGParser
+    {
+        private static readonly Regex RouteRegex = new Regex(
+        @"^[ ]+(?<dest>[\d\.\/]+)\s+(?<proto>\w+)\s+(?<pre>\d+)\s+(?<cost>\d+)\s+(?<flags>\w+)?\s+(?<next>[\d\.]+)\s+(?<intf>[\w\.\-\/]+)",
+        RegexOptions.Compiled | RegexOptions.Multiline);
+
+        // Паттерн для зон (учитывает description и другие поля между именем и интерфейсами)
+        private static readonly Regex ZoneRegex = new Regex(
+            // Изменения: 
+            // 1. Убрали лишние \s перед и после приоритета.
+            // 2. interfaces теперь захватывает всё до ПЕРВОГО встречного символа #
+            @"vpn-instance\s+\S+\s+(?<zoneName>\S+)[\s\S]*?interface\s+of\s+the\s+zone\s+is\s+\(\d+\):\s*(?<interfaces>[^#]*?)\s*(?=#)",
+            RegexOptions.Compiled);
+
+        public static List<RouteEntry> ParseRoutes(string rawData)
+        {
+            var routes = new List<RouteEntry>();
+
+            // Находим все совпадения
+            var matches = RouteRegex.Matches(rawData);
+
+            foreach (Match match in matches)
+            {
+                var (start, end) = NetworkExtensions.GetUintRange(match.Groups["dest"].Value);
+                routes.Add(new RouteEntry(
+                    minIp: start,
+                    maxIp: end,
+                    Destination: match.Groups["dest"].Value,
+                    Protocol: match.Groups["proto"].Value,
+                    Preference: int.Parse(match.Groups["pre"].Value),
+                    Cost: int.Parse(match.Groups["cost"].Value),
+                    Flags: match.Groups["flags"].Value, // Может быть пустым
+                    NextHop: match.Groups["next"].Value,
+                    Interface: match.Groups["intf"].Value
+                ));
+            }
+
+            return routes;
+        }
+
+        public static List<ZoneEntry> ParseZones(string rawData)
+        {
+            var zones = new List<ZoneEntry>();
+
+            // Ищем все блоки зон в тексте
+            var matches = ZoneRegex.Matches(rawData);
+
+            foreach (Match match in matches)
+            {
+                string name = match.Groups["zoneName"].Value.Trim();
+                string rawInterfaces = match.Groups["interfaces"].Value;
+
+                // ВРЕМЕННО для отладки: посмотри в консоль, что там внутри
+                //Console.WriteLine($"Zone: {name}, Raw content: [{rawInterfaces}]");
+
+                var interfaceList = rawInterfaces
+                    .Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries) // Добавил явный \r\n
+                    .Select(i => i.Trim())
+                    .Where(i => !string.IsNullOrEmpty(i))
+                    // Убираем возможные артефакты, если Regex захватил лишние пробелы перед #
+                    .Where(i => i != "#")
+                    .ToList();
+
+                zones.Add(new ZoneEntry(name, interfaceList));
+            }
+
+            return zones;
+        }
+    }
+}

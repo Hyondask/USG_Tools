@@ -4,9 +4,9 @@ using System.Collections.Generic;
 using System.Text;
 using USG_Tools.Core.Extensions;
 
+
 namespace USG_Tools.Core.Models
 {
-    // credentials.json
     public class UserCredentials
     {
         public string Login { get; set; } = string.Empty;

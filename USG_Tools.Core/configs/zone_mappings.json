@@ -1,0 +1,182 @@
+{
+  "VOIP_SVETEC": {
+    "In": "VOIP_SVETEC_IN",
+    "Out": "VOIP_SVETEC_OUT"
+  },
+  "VOIP": {
+    "In": "VOIP_IN",
+    "Out": "VOIP_OUT"
+  },
+  "VIDEO": {
+    "In": "VIDEO_IN",
+    "Out": "VIDEO_OUT"
+  },
+  "TEMP_CORE_AUP": {
+    "In": "TEMP_CORE_AUP",
+    "Out": ""
+  },
+  "IC_CP61K_USG": {
+    "In": "IC_CP61K_USG_IN",
+    "Out": ""
+  },
+  "SEC_SP": {
+    "In": "SEC_SP_IN",
+    "Out": "SEC_SP_OUT"
+  },
+  "SEC_IAA": {
+    "In": "SEC_IAA_IN",
+    "Out": "SEC_IAA_OUT"
+  },
+  "SEC_DSO": {
+    "In": "SEC_DSO_IN",
+    "Out": "SEC_DSO_OUT"
+  },
+  "SEC_DLP": {
+    "In": "SEC_DLP_IN",
+    "Out": "SEC_DLP_OUT"
+  },
+  "SEC_CORP": {
+    "In": "SEC_CORP_IN",
+    "Out": "SEC_CORP_OUT"
+  },
+  "SEC": {
+    "In": "SEC_IN",
+    "Out": "SEC_OUT"
+  },
+  "OSS_SRK_DMZ": {
+    "In": "OSS_SRK_DMZ_IN",
+    "Out": "OSS_SRK_DMZ_OUT"
+  },
+  "OSS_ESX_DMZ": {
+    "In": "OSS_ESX_DMZ_IN",
+    "Out": "OSS_ESX_DMZ_OUT"
+  },
+  "OSS_ESPMBX_I": {
+    "In": "OSS_ESPMBX_I_IN",
+    "Out": "OSS_ESPMBX_I_OUT"
+  },
+  "OSS_CITRIX_NS": {
+    "In": "OSS_CITRIX_NS_IN",
+    "Out": "OSS_CITRIX_NS_OUT"
+  },
+  "OSS": {
+    "In": "OSS_IN",
+    "Out": "OSS_OUT"
+  },
+  "OSM": {
+    "In": "OSM_IN",
+    "Out": "OSM_OUT"
+  },
+  "MGMT_VOIP": {
+    "In": "MGMT_VOIP_IN",
+    "Out": "MGMT_VOIP_OUT"
+  },
+  "MGMT_SRV": {
+    "In": "MGMT_SRV_IN",
+    "Out": "MGMT_SRV_OUT"
+  },
+  "MGMT_SOCHI": {
+    "In": "MGMT_SOCHI_IN",
+    "Out": "MGMT_SOCHI_OUT"
+  },
+  "MGMT_CP_DMZ": {
+    "In": "MGMT_CP_DMZ_IN",
+    "Out": "MGMT_CP_DMZ_OUT"
+  },
+  "MGMT": {
+    "In": "MGMT_IN",
+    "Out": "MGMT_OUT"
+  },
+  "KSPD_PROTECTED": {
+    "In": "",
+    "Out": ""
+  },
+  "KSPD_OUTSIDE": {
+    "In": "KSPD_OS_R00_IN",
+    "Out": "KSPD_OS_R00_OUT"
+  },
+  "IC_CP13500_R00": {
+    "In": "IC_CP13500_R00_IN",
+    "Out": ""
+  },
+  "HQ1": {
+    "In": "HQ1_IN",
+    "Out": "HQ1_OUT"
+  },
+  "GOST_VPN": {
+    "In": "GOST_VPN_IN",
+    "Out": "GOST_VPN_OUT"
+  },
+  "BSS_ZS": {
+    "In": "BSS_ZS_IN",
+    "Out": "BSS_ZS_OUT"
+  },
+  "BSS_VKS": {
+    "In": "BSS_VKS_IN",
+    "Out": "BSS_VKS_OUT"
+  },
+  "BSS_VDI": {
+    "In": "BSS_VDI_IN",
+    "Out": "BSS_VDI_OUT"
+  },
+  "BSS_TEST": {
+    "In": "BSS_TEST_IN",
+    "Out": "BSS_TEST_OUT"
+  },
+  "BSS_TEMP": {
+    "In": "BSS_TEMP_IN",
+    "Out": "BSS_TEMP_OUT"
+  },
+  "BSS_SZDFM_02": {
+    "In": "BSS_SZDFM_02_IN",
+    "Out": "BSS_SZDFM_02_OUT"
+  },
+  "BSS_SZDFM": {
+    "In": "BSS_SZDFM_IN",
+    "Out": "BSS_SZDFM_OUT"
+  },
+  "BSS_PROD": {
+    "In": "BSS_PROD_IN",
+    "Out": "BSS_PROD_OUT"
+  },
+  "BSS_PREP": {
+    "In": "BSS_PREP_IN",
+    "Out": "BSS_PREP_OUT"
+  },
+  "BSS_DRT_TEST": {
+    "In": "BSS_DRT_TEST_IN",
+    "Out": "BSS_DRT_TEST_OUT"
+  },
+  "BSS_DRT_PROD": {
+    "In": "BSS_DRT_PROD_IN",
+    "Out": "BSS_DRT_PROD_OUT"
+  },
+  "BSS_DRT_PREP": {
+    "In": "BSS_DRT_PREP_IN",
+    "Out": "BSS_DRT_PREP_OUT"
+  },
+  "BSS_DRT_DEV": {
+    "In": "BSS_DRT_DEV_IN",
+    "Out": "BSS_DRT_DEV_OUT"
+  },
+  "BSS_DEV": {
+    "In": "BSS_DEV_IN",
+    "Out": "BSS_DEV_OUT"
+  },
+  "BSS_CITRIX_VDA": {
+    "In": "BSS_CITRIX_VDA_IN",
+    "Out": "BSS_CITRIX_VDA_OUT"
+  },
+  "BSS_CA_MO": {
+    "In": "BSS_CA_MO_IN",
+    "Out": "BSS_CA_MO_OUT"
+  },
+  "BSS": {
+    "In": "BSS_IN",
+    "Out": "BSS_OUT"
+  },
+  "OSS_SRK": {
+    "In": "OSS_SRK_IN",
+    "Out": "OSS_SRK_OUT"
+  }
+}

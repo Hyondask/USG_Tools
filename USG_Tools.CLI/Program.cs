@@ -10,7 +10,7 @@ namespace USG_Tools.CLI
     {
         static async Task Main(string[] args)
         {
-
+            SQLitePCL.Batteries.Init();
             // Берем конфигурацию логера из json 
             var configuration = new ConfigurationBuilder()
                 .SetBasePath(AppContext.BaseDirectory)
@@ -34,7 +34,7 @@ namespace USG_Tools.CLI
                 var configManager = new ConfigManager(configLogger);
 
                 var menuLogger = loggerFactory.CreateLogger<Menu>();
-                var menu = new Menu(configManager, menuLogger);
+                var menu = new Menu(configManager, loggerFactory);
 
                 // 5. Запуск
                 await menu.RunAsync();

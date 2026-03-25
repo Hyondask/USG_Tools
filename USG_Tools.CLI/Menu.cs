@@ -9,11 +9,15 @@ namespace USG_Tools.CLI
     {
         private readonly ConfigManager _configManager;
         private readonly ILogger _logger;
+        private readonly ILoggerFactory _loggerFactory;
         private string _lastErrorMessage;
-        public Menu(ConfigManager configManager, ILogger menulogger)
+        public Menu(ConfigManager configManager, ILoggerFactory loggerFactory)
         {
-            _configManager = configManager;
-            _logger = menulogger;
+            // Проверка на null
+            _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+            _configManager = configManager ?? throw new ArgumentNullException(nameof(configManager));
+
+            _logger = _loggerFactory.CreateLogger<Menu>();
         }
 
         // --- ТОЧКА ВХОДА ---
@@ -62,11 +66,17 @@ namespace USG_Tools.CLI
         {
             Console.Clear();
             Console.WriteLine(">>> ЗАПУСК СБОРА ДАННЫХ");
-            // Вызываем логику из Core через DeviceDiscoveryService
-            // После сбора вызываем DatabaseService.SaveToSqliteAsync
+
+            var discovery = new DiscoveryManager(_configManager, _loggerFactory);
+            await discovery.UpdateDatabase();
+
+            //Выполняем запросы
+            //usg.Connect("10.7.219.11");
+
+            //USGManager usg = new USGManager(_configManager.Credentials, _loggerFactory.CreateLogger<USGManager>());
             Console.WriteLine("\nНажмите любую клавишу для возврата...");
             Console.ReadKey();
-        }
+        }   
 
 
         // --- Технические функции ----

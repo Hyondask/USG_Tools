@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-
-namespace USG_Tools.Core.Extensions
+﻿namespace USG_Tools.Core.Extensions
 {
     public static class StringExtensions
     {
@@ -14,5 +10,7 @@ namespace USG_Tools.Core.Extensions
             }
             return new string('*', 10);
         }
+
     }
+
 }

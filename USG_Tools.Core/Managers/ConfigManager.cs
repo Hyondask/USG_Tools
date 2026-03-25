@@ -13,6 +13,7 @@ namespace USG_Tools.Core.Managers
         private readonly string _configFolderPath;
         private readonly string _secretFolder;
         private readonly string _secretFilePath;
+        private readonly string _zonemappingFilePath;
         private ILogger _logger;
 
 
@@ -27,7 +28,8 @@ namespace USG_Tools.Core.Managers
             _secretFolder = Path.Combine(_appData, "USG_Tools");
             _secretFilePath = Path.Combine(_secretFolder, "secrets.json");
             _basePath = AppContext.BaseDirectory;
-            _configFolderPath = Path.Combine(_basePath, "config");
+            _configFolderPath = Path.Combine(_basePath, "configs");
+            _zonemappingFilePath = Path.Combine(_configFolderPath, "zone_mappings.json");
 
             //2. Создаем папки с конфигами, если их еще нет
 
@@ -68,6 +70,21 @@ namespace USG_Tools.Core.Managers
                 SaveJson<UserCredentials>(_secretFilePath, Credentials);
             }
             catch (Exception ex) { throw; }
+        }
+
+        public Dictionary<string, ZoneMapping> LoadZoneMappings()
+        {
+            string path = Path.Combine(_zonemappingFilePath);
+            if (!File.Exists(path))
+            {
+                _logger.LogError("не найден файл {file}", _zonemappingFilePath);
+                return new Dictionary<string, ZoneMapping>();
+            }
+
+
+            string json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<Dictionary<string, ZoneMapping>>(json)
+                   ?? new Dictionary<string, ZoneMapping>();
         }
 
         /// <summary>
