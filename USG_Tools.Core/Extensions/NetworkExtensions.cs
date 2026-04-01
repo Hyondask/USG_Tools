@@ -1,8 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net;
-using System.Text;
-using System.Net;
 
 
 namespace USG_Tools.Core.Extensions
@@ -50,5 +48,61 @@ namespace USG_Tools.Core.Extensions
                 return (0, 0);
             }
         }
+        /// <summary>
+        /// Анализирует список строковых IP-адресов, отфильтровывает невалидные, удаляет дубликаты 
+        /// и группирует идущие подряд адреса в непрерывные диапазоны.
+        /// </summary>
+        /// <param name="ips">Коллекция строковых представлений IP-адресов (например, "10.0.0.1", "10.0.0.2").</param>
+        /// <returns>
+        /// Возвращает список кортежей <see cref="ValueTuple{IPAddress, IPAddress}"/>, представляющих диапазоны. 
+        /// Если IP-адрес не имеет смежных адресов, значения <c>Start</c> и <c>End</c> в кортеже будут совпадать.
+        /// </returns>
+        /// <remarks>
+        /// Метод автоматически сортирует адреса по возрастанию перед поиском диапазонов. 
+        /// Некорректные строки, которые не удалось спарсить в <see cref="IPAddress"/>, молча игнорируются.
+        /// </remarks>
+        public static List<(IPAddress Start, IPAddress End)> DetectRanges(IEnumerable<string> ips)
+        {
+            // 1. Парсим и конвертируем IP в числа для удобного сравнения (+1)
+            var validIps = ips
+                .Select(ip => IPAddress.TryParse(ip.Trim(), out var parsed) ? parsed : null)
+                .Where(ip => ip != null)
+                .Select(ip => new { IpObj = ip, UIntVal = IpToUInt(ip) })
+                .OrderBy(x => x.UIntVal)
+                .GroupBy(x => x.UIntVal).Select(g => g.First()) // Убираем дубликаты
+                .ToList();
+
+            var ranges = new List<(IPAddress Start, IPAddress End)>();
+            if (!validIps.Any()) return ranges;
+
+            var startIp = validIps[0];
+            var currentIp = validIps[0];
+
+            // 2. Ищем идущие подряд адреса
+            for (int i = 1; i < validIps.Count; i++)
+            {
+                if (validIps[i].UIntVal == currentIp.UIntVal + 1)
+                {
+                    currentIp = validIps[i]; // IP идут подряд, расширяем диапазон
+                }
+                else
+                {
+                    ranges.Add((startIp.IpObj, currentIp.IpObj)); // Диапазон прервался, сохраняем
+                    startIp = validIps[i];
+                    currentIp = validIps[i];
+                }
+            }
+            ranges.Add((startIp.IpObj, currentIp.IpObj)); // Сохраняем последний хвост
+
+            return ranges;
+        }
+
+        private static uint IpToUInt(IPAddress ip)
+        {
+            byte[] bytes = ip.GetAddressBytes();
+            if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
+            return BitConverter.ToUInt32(bytes, 0);
+        }
+
     }
 }

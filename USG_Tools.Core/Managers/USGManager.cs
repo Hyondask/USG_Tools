@@ -65,6 +65,7 @@ namespace USG_Tools.Core.Managers
         /// </remarks>
         public async Task<string> GetInsideRoutes()
         {
+            _logger.LogInformation("Скачивание маршрутов");
             return await ExecuteCommandInVsysAsync("display ip routing-table | exclude ([0-9\\.]\\/32|[0-9\\.]\\/30|Eth.*\\.400|NULL0|0\\.0\\.0\\.0\\/0|Virtual\\-if)", TimeSpan.FromSeconds(20));
         }
 
@@ -74,7 +75,21 @@ namespace USG_Tools.Core.Managers
         /// <returns>Возвращает <see cref="string"/> с сырым выводом конфигурации зон или <see langword="null"/> в случае ошибки.</returns>
         public async Task<string> GetInsideZones()
         {
+            _logger.LogInformation("Скачивание Зон");
             return await ExecuteCommandInVsysAsync("display zone", TimeSpan.FromSeconds(30));
+        }
+
+        /// <summary>
+        /// Скачивает полную текущую конфигурацию (display current-configuration) для контекста INSIDE.
+        /// Выкачивание полного конфига за один раз позволяет локально парсить любые блоки (security-policy, address-set, zones),
+        /// не создавая лишней нагрузки на SSH-сессию.
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> с сырым текстом полной конфигурации или <see langword="null"/> в случае ошибки.</returns>
+        public async Task<string> GetInsideCurrentConfig()
+        {
+            _logger.LogInformation("Скачивание конфигурации INSIDE");
+            // Используем таймаут в 60 секунд, так как полная конфигурация с тысячами правил может выводиться долго
+            return await ExecuteCommandInVsysAsync("display current-configuration", TimeSpan.FromSeconds(60));
         }
 
         /// <summary>
