@@ -1,5 +1,6 @@
 ﻿using ClosedXML;
 using ClosedXML.Excel;
+using DocumentFormat.OpenXml.Spreadsheet;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,8 +12,9 @@ using USG_Tools.Core.Models;
 
 namespace USG_Tools.Core.Parsers
 {
-    public class ExcelIpParser
+    public class ExcelParser
     {
+
         // Регулярное выражение для поиска IPv4-адресов.
         private static readonly string IpV4RegexPattern = @"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b";
         private static readonly Regex IpV4Regex = new Regex(IpV4RegexPattern, RegexOptions.Compiled);
@@ -23,67 +25,74 @@ namespace USG_Tools.Core.Parsers
         /// </summary>
         /// <param name="filepath">Путь к файлу Excel.</param>
         /// <returns>Список объектов IpMigration.</returns>
-        public static List<IpMigration> ReadIpListFromExcel(string filepath)
+        public static List<IpMigration> ReadMigrationIp(string filepath, string sheetName = "Миграция")
         {
             var ipList = new List<IpMigration>();
             List<string> errorList = new List<string>();
 
-            using ( var workbook = new XLWorkbook(filepath))
+            using (var stream = new FileStream(filepath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             {
-                var worksheet = workbook.Worksheets.First();
-                var range = worksheet.RangeUsed();
-
-                if (range == null || range.RowCount() <= 1)
+                using (var workbook = new XLWorkbook(filepath))
                 {
-                    Console.WriteLine("Файл Excel пуст или содержит только заголовок.");
-                    return ipList;
-                }
-
-                foreach (var row in range.RowsUsed().Skip(1))
-                {
-                    string number = row.Cell(1).GetString();
-                    string oldZone = row.Cell(4).GetString();
-                    string oldIpCellContent = row.Cell(5).GetString();
-                    string newIpCellContent = row.Cell(6).GetString();
-                    string newZone = row.Cell(7).GetString();
-
-                    List<string> foundOldIps = FindAllIpV4Addresses(oldIpCellContent);
-                    List<string> foundNewIps = FindAllIpV4Addresses(newIpCellContent);
-
-                    // 1. Проверка на наличие данных
-                    if (!foundOldIps.Any()) errorList.Add($"В поле под номером {number} отсутствует Old IP.");
-                    if (!foundNewIps.Any()) errorList.Add($"В поле под номером {number} отсутствует New IP.");
-
-                    if (!foundOldIps.Any() || !foundNewIps.Any()) continue;
-
-                    foreach (string oldIpString in foundOldIps)
+                    // Ищем вкладку по имени. Если не нашли — выбрасываем исключение или берем первую.
+                    if (!workbook.Worksheets.TryGetWorksheet(sheetName, out var worksheet))
                     {
-                        if (!IPAddress.TryParse(oldIpString, out IPAddress? oldIp)) continue;
+                        throw new Exception($"Вкладка '{sheetName}' не найдена в файле {filepath}");
+                    }
+                    var range = worksheet.RangeUsed();
 
-                        // 2. Проверка: Old IP должен быть в сети 10.0.0.0/8
-                        if (!IsInternalTenEight(oldIp))
+                    if (range == null || range.RowCount() <= 1)
+                    {
+                        Console.WriteLine("Файл Excel пуст или содержит только заголовок.");
+                        return ipList;
+                    }
+
+                    foreach (var row in range.RowsUsed().Skip(1))
+                    {
+                        string number = row.Cell(1).GetString();
+                        string oldZone = row.Cell(4).GetString();
+                        string oldIpCellContent = row.Cell(5).GetString();
+                        string newIpCellContent = row.Cell(6).GetString();
+                        string newZone = row.Cell(7).GetString();
+
+                        List<string> foundOldIps = FindAllIpV4Addresses(oldIpCellContent);
+                        List<string> foundNewIps = FindAllIpV4Addresses(newIpCellContent);
+
+                        // 1. Проверка на наличие данных
+                        if (!foundOldIps.Any()) errorList.Add($"В поле под номером {number} отсутствует Old IP.");
+                        if (!foundNewIps.Any()) errorList.Add($"В поле под номером {number} отсутствует New IP.");
+
+                        if (!foundOldIps.Any() || !foundNewIps.Any()) errorList.Add($"В поле под номером {number} отсутствуют IP ");
+
+                        foreach (string oldIpString in foundOldIps)
                         {
-                            errorList.Add($"В поле под номером {number} адрес Old IP ({oldIpString}) является внешним. Разрешена только сеть 10.0.0.0/8");
-                        }
+                            if (!IPAddress.TryParse(oldIpString, out IPAddress? oldIp)) continue;
 
-                        foreach (string newIpString in foundNewIps)
-                        {
-                            if (!IPAddress.TryParse(newIpString, out IPAddress? newIp)) continue;
-
-                            // 2. Проверка: New IP должен быть в сети 10.0.0.0/8
-                            if (!IsInternalTenEight(newIp))
+                            // 2. Проверка: Old IP должен быть в сети 10.0.0.0/8
+                            if (!IsInternalTenEight(oldIp))
                             {
-                                errorList.Add($"В поле под номером {number} адрес New IP ({newIpString}) является внешним. Разрешена только сеть 10.0.0.0/8");
+                                errorList.Add($"В поле под номером {number} адрес Old IP ({oldIpString}) является внешним. Разрешена только сеть 10.0.0.0/8");
                             }
 
-                            ipList.Add(new IpMigration
+                            foreach (string newIpString in foundNewIps)
                             {
-                                NewZone = newZone,
-                                NewIp = newIp,
-                                OldIp = oldIp,
-                                OldZone = oldZone,
-                                SourceNumber = number
-                            });
+                                if (!IPAddress.TryParse(newIpString, out IPAddress? newIp)) continue;
+
+                                // 2. Проверка: New IP должен быть в сети 10.0.0.0/8
+                                if (!IsInternalTenEight(newIp))
+                                {
+                                    errorList.Add($"В поле под номером {number} адрес New IP ({newIpString}) является внешним. Разрешена только сеть 10.0.0.0/8");
+                                }
+
+                                ipList.Add(new IpMigration
+                                {
+                                    NewZone = newZone,
+                                    NewIp = newIp,
+                                    OldIp = oldIp,
+                                    OldZone = oldZone,
+                                    SourceNumber = number
+                                });
+                            }
                         }
                     }
                 }
@@ -106,9 +115,9 @@ namespace USG_Tools.Core.Parsers
             // 4. Итоговый вывод (теперь только критические ошибки валидации IP)
             //if (errorList.Any())
             //{
-              Console.WriteLine("--- ОШИБКИ ВАЛИДАЦИИ СЕТЕЙ ---");
-              errorList.Distinct().ToList().ForEach(e => Console.WriteLine($"- {e}"));
-              //return new List<IpMigration>();
+            Console.WriteLine("--- ОШИБКИ ВАЛИДАЦИИ СЕТЕЙ ---");
+            errorList.Distinct().ToList().ForEach(e => Console.WriteLine($"- {e}"));
+            //return new List<IpMigration>();
             //}
 
             return uniqueIpList;

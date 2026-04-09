@@ -24,5 +24,32 @@ namespace USG_Tools.Core.Models
         public string? Action { get; set; }
 
         public string FullRule { get; set; } // Храним фулл правило
+
+
+        public bool ContainsIp(IPAddress targetIp)
+        {
+            // Проверяем список Source 
+            if (SourceAddressRange != null)
+            {
+                foreach (IpRange ipRange in SourceAddressRange)
+                {
+                    if (ipRange != null && ipRange.ContainsIp(targetIp)) return true; 
+
+                }
+            }
+
+            // Проверяем список Destination
+            if (DestinationAddressRange != null)
+            {
+                foreach (IpRange ipRange in DestinationAddressRange)
+                {
+                    if (ipRange!= null &&  ipRange.ContainsIp(targetIp)) return true;
+                }
+            }
+
+            return false;
+
+        }
     }
+
 }

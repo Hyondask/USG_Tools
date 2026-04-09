@@ -1,7 +1,5 @@
 === СТРУКТУРА ПРОЕКТА ===
 ./
-    .github/
-        workflows/
     USG_Tools.CLI/
         Menu.cs
         Program.cs
@@ -14,22 +12,33 @@
         Constants/
             PromptPatterns.cs
         Extensions/
+            IpAddressRangeComparer.cs
             NetworkExtensions.cs
             StringExtensions.cs
+        Helpers/
+            ipHelper.cs
         Managers/
             ConfigManager.cs
             DatabaseManager.cs
             DiscoveryManager.cs
+            RulesManager.cs
             USGManager.cs
         Models/
             FinalRoute.cs
+            FirewallRule.cs
+            IpMatchResult.cs
+            IpMigration.cs
+            IpRange.cs
+            MatchedRule.cs
             RouteEntry.cs
+            Serviceport.cs
             UserCredentials.cs
             ZoneEntry.cs
             ZoneMapping.cs
         Parsers/
+            ExcelIpParser.cs
+            FirewallRuleParser.cs
             USGParser.cs
-        Properties/
 
 
 === СОДЕРЖИМОЕ ФАЙЛОВ ===
@@ -46,6 +55,9 @@ using USG_Tools.Core.Models;
 
 namespace USG_Tools.CLI
 {
+    /// <summary>
+    /// Точка старта работы с программой конечным пользователем. Управляет навигацией и связывает UI с Core 
+    /// </summary>
     public class Menu
     {
         private readonly ConfigManager _configManager;
@@ -61,7 +73,10 @@ namespace USG_Tools.CLI
             _logger = _loggerFactory.CreateLogger<Menu>();
         }
 
-        // --- ТОЧКА ВХОДА ---
+        /// <summary>
+        /// Главный цикл приложения (Main Loop)
+        /// </summary>
+        /// <returns></returns>
         public async Task RunAsync()
         {
             try
@@ -81,7 +96,9 @@ namespace USG_Tools.CLI
                 Console.WriteLine("========================================");
                 Console.WriteLine("        HUAWEI USG HELPER TOOL          ");
                 Console.WriteLine("========================================");
-                Console.WriteLine("2. Поиск зоны по IP адресу");
+                Console.WriteLine("2. Проверка наличия доступа");
+                Console.WriteLine("2. Демонтаж доступа");
+                Console.WriteLine("3. Миграция правил (На основе Excel)");
                 Console.WriteLine("8. Настройки (Credentials/Proxy)");
                 Console.WriteLine("9. Обновление БД");
                 Console.WriteLine("0. Выход");
@@ -90,6 +107,7 @@ namespace USG_Tools.CLI
 
                 switch (Console.ReadLine())
                 {
+                    case "3": await RunMigration(); break;
                     case "8": await RunSetup(); break;
                     case "9": await ShowDiscoveryMenu(); break;
                     case "0": return;
@@ -101,7 +119,22 @@ namespace USG_Tools.CLI
             }
         }
 
-        // --- ПОДМЕНЮ ---
+        /// <summary>
+        /// Сбор правил для отчета миграции серверов в новые подсети
+        /// </summary>
+        /// <returns></returns>
+        private async Task RunMigration()
+        {
+            string filename = "AddressBook.xlsx";
+            RulesManager manager = new RulesManager(new USGManager(_configManager.Credentials, _loggerFactory.CreateLogger<USGManager>()), _loggerFactory);
+            manager.RunMigrationWorkFlow();
+            Console.ReadLine();
+        }
+
+        /// <summary>
+        /// Сбор данных маршрутизации в SQLite
+        /// </summary>
+        /// <returns></returns>
 
         private async Task ShowDiscoveryMenu()
         {
@@ -111,10 +144,6 @@ namespace USG_Tools.CLI
             var discovery = new DiscoveryManager(_configManager, _loggerFactory);
             await discovery.UpdateDatabase();
 
-            //Выполняем запросы
-            //usg.Connect("10.7.219.11");
-
-            //USGManager usg = new USGManager(_configManager.Credentials, _loggerFactory.CreateLogger<USGManager>());
             Console.WriteLine("\nНажмите любую клавишу для возврата...");
             Console.ReadKey();
         }   
@@ -162,14 +191,19 @@ namespace USG_Tools.CLI
 
 
         }
-
+        /// <summary>
+        /// Отображение УЗ в консоль
+        /// </summary>
+        /// <returns></returns>
         private async Task ShowCredentials()
         {
             Console.WriteLine(_configManager.Credentials.ToString());
         }
 
-        //--- Мастер настройки учетных данных --- 
-
+        /// <summary>
+        /// Мастер настройки УЗ 
+        /// </summary>
+        /// <returns></returns>
         private async Task SetupMaster()
         {
             _configManager.Credentials = new UserCredentials();
@@ -177,6 +211,10 @@ namespace USG_Tools.CLI
             _configManager.UpdateCredentials(_configManager.Credentials);
         }
 
+        /// <summary>
+        /// Меню настройки основных учетных данных
+        /// </summary>
+        /// <returns></returns>
         private async Task MainCredentialsSetup()
         {
             Console.WriteLine("===Настройка учетных данных===");
@@ -195,6 +233,10 @@ namespace USG_Tools.CLI
 
         }
 
+        /// <summary>
+        /// Меню настройки учетных данных для подключения к Proxy
+        /// </summary>
+        /// <returns></returns>
         private async Task ProxyCredentialsSetup()
         {
             Console.WriteLine("===Настройка данных прокси===");
@@ -206,6 +248,10 @@ namespace USG_Tools.CLI
             _configManager.Credentials.ProxyHost = ConsoleUtils.GetIp();
         }
 
+        /// <summary>
+        /// Отображение ошибок, если имеются
+        /// </summary>
+        /// <returns></returns>
         private async Task ShowError()
         {
             if (!string.IsNullOrEmpty(_lastErrorMessage))
@@ -236,6 +282,11 @@ namespace USG_Tools.CLI
 {
     class Program
     {
+        /// <summary>
+        /// Точка старта программы
+        /// </summary>
+        /// <param name="args">Аргументы, при вызове командной строки</param>
+        /// <returns></returns>
         static async Task Main(string[] args)
         {
             SQLitePCL.Batteries.Init();
@@ -330,9 +381,10 @@ namespace USG_Tools.CLI.Utils
     {
 
         /// <summary>
-        /// Заполнение строки с закрытими данными
+        /// Заполнение строки с чувствтительными данными.
+        /// Прячет введенные пользователем символы 
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Возвращает <see cref="string"/> с заполненными данными от клиента </returns>
         public static string ReadSecret()
         {
             var sb = new StringBuilder();
@@ -357,6 +409,11 @@ namespace USG_Tools.CLI.Utils
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Обязательное заполнение строки.
+        /// При вводе пустой строки выход из метода не произойдет
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> с заполненными данными от клиента</returns>
         public static string GetNotEmptyString()
         {
             string data = string.Empty;
@@ -371,6 +428,11 @@ namespace USG_Tools.CLI.Utils
             return data;
         }
 
+        /// <summary>
+        /// Метод, интерпретирующий ответ y/n как True/False
+        /// Выводит y/n в консоль и ждет ввода пользователя
+        /// </summary>
+        /// <returns> Возвращает <see cref="bool"/> ответ пользователя <see langword="true"/>/<see langword="false"/> "/></returns>
         public static bool GetYesOrNo()
         {
             while (true)
@@ -383,7 +445,11 @@ namespace USG_Tools.CLI.Utils
                 }
             }
         }
-
+        /// <summary>
+        /// Принимает строку клиента и проверяет является ли строка ip адресом или нет
+        /// Если строка не является IP адресом, то просит клиента ввести IP Адрес
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> Валидный Ip адрес</returns>
         public static string GetIp()
         {
             while (true)
@@ -399,6 +465,11 @@ namespace USG_Tools.CLI.Utils
             }
 
         }
+        /// <summary>
+        /// Принимает от клиента список IP адресов с проверкой IP адреса на подлинность. В строке принимает по одному адресу
+        /// Завершает сбор при вводе пустой строки
+        /// </summary>
+        /// <returns></returns>
         public static List<string> GetIpList()
         {
             List<string> iplist = new List<string>();
@@ -419,12 +490,22 @@ namespace USG_Tools.CLI.Utils
             }
             return iplist;
         }
+        /// <summary>
+        /// Проверка, является ли указанный символ специальным символом
+        /// </summary>
+        /// <param name="keyInfo">Символ для проверки</param>
+        /// <returns>Возвращает <see cref="bool" /></returns>
         private static bool CheckSpecialKeys(ConsoleKeyInfo keyInfo)
         {
             if (char.IsControl(keyInfo.KeyChar)) { return true; }
             return false;
         }
 
+        /// <summary>
+        /// Метод для удаление последнего символа из строки
+        /// </summary>
+        /// <param name="sb"> <see cref="StringBuilder"/> строка</param>
+        /// <returns><see cref="StringBuilder"/> строка без последнего символа</returns>
         private static StringBuilder RemoveLastKey(StringBuilder sb)
         {
             if (sb.Length > 0)
@@ -451,6 +532,7 @@ namespace USG_Tools.CLI.Utils
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Dapper" Version="2.1.72" />
     <PackageReference Include="IPNetwork2" Version="3.4.853" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.3" />
@@ -471,6 +553,9 @@ namespace USG_Tools.CLI.Utils
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="AddressBook.xlsx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="configs\zone_mappings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -491,16 +576,61 @@ using System.Text;
 
 namespace USG_Tools.Core.Constants
 {
+
+    /// <summary>
+    /// Паттерны RegExp выражений
+    /// </summary>
     public static class PromptPatterns
     {
         // Ищем [ЛюбоеИмя] в конце строки
-        public const string SystemView = @"\[.*\]\s*$";
+        public const string HuaweiSystemView = @"\[.*\]\s*$";
 
         // Ищем -INSIDE перед > или ] в конце строки
-        public const string InsideVsys = @"-INSIDE[>\]]\s*$";
+        public const string HuaweiInsideVsys = @"-INSIDE[>\]]\s*$";
 
         // Ищем <ЛюбоеИмя> в конце строки (User View)
-        public const string UserView = @"<.*?>\s*$";
+        public const string HuaweiUserView = @"<.*?>\s*$";
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Extensions\IpAddressRangeComparer.cs
+==================================================
+
+﻿using System;
+using System.Net;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace USG_Tools.Core.Extensions
+{
+
+    /// <summary>
+    /// Компаратор для побайтового сравнения IPv4/IPv6 адресов.
+    /// </summary>
+    public class IpAddressRangeComparer : IComparer<IPAddress?>
+    {
+        public int Compare(IPAddress? x, IPAddress? y)
+        {
+            if (x == null || y == null)
+                return x == null && y == null ? 0 : x == null ? -1 : 1;
+
+            byte[] bytesX = x.GetAddressBytes();
+            byte[] bytesY = y.GetAddressBytes();
+
+            // Сравниваем байты IP-адресов
+            for (int i = 0; i < bytesX.Length; i++)
+            {
+                if (bytesX[i] != bytesY[i])
+                {
+                    return bytesX[i].CompareTo(bytesY[i]);
+                }
+            }
+            return 0;
+        }
     }
 }
 
@@ -511,8 +641,6 @@ namespace USG_Tools.Core.Constants
 
 ﻿using System;
 using System.Collections.Generic;
-using System.Net;
-using System.Text;
 using System.Net;
 
 
@@ -561,6 +689,62 @@ namespace USG_Tools.Core.Extensions
                 return (0, 0);
             }
         }
+        /// <summary>
+        /// Анализирует список строковых IP-адресов, отфильтровывает невалидные, удаляет дубликаты 
+        /// и группирует идущие подряд адреса в непрерывные диапазоны.
+        /// </summary>
+        /// <param name="ips">Коллекция строковых представлений IP-адресов (например, "10.0.0.1", "10.0.0.2").</param>
+        /// <returns>
+        /// Возвращает список кортежей <see cref="ValueTuple{IPAddress, IPAddress}"/>, представляющих диапазоны. 
+        /// Если IP-адрес не имеет смежных адресов, значения <c>Start</c> и <c>End</c> в кортеже будут совпадать.
+        /// </returns>
+        /// <remarks>
+        /// Метод автоматически сортирует адреса по возрастанию перед поиском диапазонов. 
+        /// Некорректные строки, которые не удалось спарсить в <see cref="IPAddress"/>, молча игнорируются.
+        /// </remarks>
+        public static List<(IPAddress Start, IPAddress End)> DetectRanges(IEnumerable<string> ips)
+        {
+            // 1. Парсим и конвертируем IP в числа для удобного сравнения (+1)
+            var validIps = ips
+                .Select(ip => IPAddress.TryParse(ip.Trim(), out var parsed) ? parsed : null)
+                .Where(ip => ip != null)
+                .Select(ip => new { IpObj = ip, UIntVal = IpToUInt(ip) })
+                .OrderBy(x => x.UIntVal)
+                .GroupBy(x => x.UIntVal).Select(g => g.First()) // Убираем дубликаты
+                .ToList();
+
+            var ranges = new List<(IPAddress Start, IPAddress End)>();
+            if (!validIps.Any()) return ranges;
+
+            var startIp = validIps[0];
+            var currentIp = validIps[0];
+
+            // 2. Ищем идущие подряд адреса
+            for (int i = 1; i < validIps.Count; i++)
+            {
+                if (validIps[i].UIntVal == currentIp.UIntVal + 1)
+                {
+                    currentIp = validIps[i]; // IP идут подряд, расширяем диапазон
+                }
+                else
+                {
+                    ranges.Add((startIp.IpObj, currentIp.IpObj)); // Диапазон прервался, сохраняем
+                    startIp = validIps[i];
+                    currentIp = validIps[i];
+                }
+            }
+            ranges.Add((startIp.IpObj, currentIp.IpObj)); // Сохраняем последний хвост
+
+            return ranges;
+        }
+
+        private static uint IpToUInt(IPAddress ip)
+        {
+            byte[] bytes = ip.GetAddressBytes();
+            if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
+            return BitConverter.ToUInt32(bytes, 0);
+        }
+
     }
 }
 
@@ -573,6 +757,11 @@ namespace USG_Tools.Core.Extensions
 {
     public static class StringExtensions
     {
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="str"> Строка, которую нужно спрятать </param>
+        /// <returns>Возвращает ********** </returns>
         public static string MaskSecretData(this string str)
         {
             if (string.IsNullOrEmpty(str))
@@ -584,6 +773,62 @@ namespace USG_Tools.Core.Extensions
 
     }
 
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Helpers\ipHelper.cs
+==================================================
+
+﻿using System.Net;
+
+namespace USG_Tools.Core.Helpers
+{
+    public static class IpHelper
+    {
+        public static List<(IPAddress Start, IPAddress End)> DetectRanges(IEnumerable<string> ips)
+        {
+            // 1. Парсим и конвертируем IP в числа для удобного сравнения (+1)
+            var validIps = ips
+                .Select(ip => IPAddress.TryParse(ip.Trim(), out var parsed) ? parsed : null)
+                .Where(ip => ip != null)
+                .Select(ip => new { IpObj = ip, UIntVal = IpToUInt(ip) })
+                .OrderBy(x => x.UIntVal)
+                .GroupBy(x => x.UIntVal).Select(g => g.First()) // Убираем дубликаты
+                .ToList();
+
+            var ranges = new List<(IPAddress Start, IPAddress End)>();
+            if (!validIps.Any()) return ranges;
+
+            var startIp = validIps[0];
+            var currentIp = validIps[0];
+
+            // 2. Ищем идущие подряд адреса
+            for (int i = 1; i < validIps.Count; i++)
+            {
+                if (validIps[i].UIntVal == currentIp.UIntVal + 1)
+                {
+                    currentIp = validIps[i]; // IP идут подряд, расширяем диапазон
+                }
+                else
+                {
+                    ranges.Add((startIp.IpObj, currentIp.IpObj)); // Диапазон прервался, сохраняем
+                    startIp = validIps[i];
+                    currentIp = validIps[i];
+                }
+            }
+            ranges.Add((startIp.IpObj, currentIp.IpObj)); // Сохраняем последний хвост
+
+            return ranges;
+        }
+
+        private static uint IpToUInt(IPAddress ip)
+        {
+            byte[] bytes = ip.GetAddressBytes();
+            if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
+            return BitConverter.ToUInt32(bytes, 0);
+        }
+    }
 }
 
 
@@ -638,6 +883,9 @@ namespace USG_Tools.Core.Managers
 
         }
 
+        /// <summary>
+        /// Чтение УЗ из json файла 
+        /// </summary>
         public void init()
         {
             // Загружаем учетные данные 
@@ -665,6 +913,10 @@ namespace USG_Tools.Core.Managers
             catch (Exception ex) { throw; }
         }
 
+        /// <summary>
+        /// Чтение маппинга зон из Json файла
+        /// </summary>
+        /// <returns></returns>
         public Dictionary<string, ZoneMapping> LoadZoneMappings()
         {
             string path = Path.Combine(_zonemappingFilePath);
@@ -866,12 +1118,21 @@ using USG_Tools.Core.Models;
 
 namespace USG_Tools.Core.Managers
 {
+    /// <summary>
+    /// Управляет подключением и взаимодействием с локальной базой данных SQLite.
+    /// Отвечает за создание таблиц и массовую запись данных.
+    /// </summary>
     public class DatabaseManager
     {
         private readonly string _connectionString;
         private readonly ILogger<DatabaseManager> _logger;
 
-
+        /// <summary>
+        /// Инициализирует новый экземпляр класса <see cref="DatabaseManager"/>.
+        /// При инициализации автоматически проверяет и создает необходимую структуру БД.
+        /// </summary>
+        /// <param name="dbPath">Путь к файлу базы данных SQLite.</param>
+        /// <param name="logger">Интерфейс для логирования операций с базой данных.</param>
         public DatabaseManager(string dbPath, ILogger<DatabaseManager> logger)
         {
             // dbPath получим из ConfigManager
@@ -880,7 +1141,13 @@ namespace USG_Tools.Core.Managers
             EnsureTableCreated();
         }
 
-
+        /// <summary>
+        /// Проверяет наличие таблицы <c>Routes</c> в базе данных и создает её, если она отсутствует.
+        /// </summary>
+        /// <remarks>
+        /// Таблица содержит обогащенные данные по маршрутам и зонам.
+        /// Вызов выполняется синхронно через Dapper при создании менеджера.
+        /// </remarks>
         public void EnsureTableCreated()
         {
             using var connection = new SqliteConnection(_connectionString);
@@ -898,33 +1165,17 @@ namespace USG_Tools.Core.Managers
         );");
         }
 
-        public void InitializeDatabase()
-        {
-            using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
 
-            var command = connection.CreateCommand();
-            command.CommandText = @"
-            CREATE TABLE IF NOT EXISTS routes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                network TEXT,
-                start_ip INTEGER,
-                end_ip INTEGER,
-                interface TEXT,
-                host TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS zones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                interface TEXT,
-                zone_name TEXT,
-                host TEXT
-            );
-            
-            CREATE INDEX IF NOT EXISTS idx_routes_ips ON routes(start_ip, end_ip);
-        ";
-            command.ExecuteNonQuery();
-        }
+        /// <summary>
+        /// Выполняет массовое сохранение списка маршрутов в базу данных.
+        /// </summary>
+        /// <param name="routes">Список объектов <see cref="FinalRoute"/>, подготовленных для записи.</param>
+        /// <returns>Представляет асинхронную операцию.</returns>
+        /// <exception cref="SqliteException">Выбрасывается при ошибках выполнения SQL-запросов (например, при блокировке файла).</exception>
+        /// <remarks>
+        /// <para>Перед вставкой новых данных таблица <c>Routes</c> полностью очищается (выполняется <c>DELETE</c>).</para>
+        /// <para>Вся операция завернута в транзакцию. В случае ошибки транзакция откатывается (<c>Rollback</c>), и старые данные сохраняются.</para>
+        /// </remarks>
         public async Task BulkSaveRoutesAsync(List<FinalRoute> routes)
         {
             using var connection = new SqliteConnection(_connectionString);
@@ -969,7 +1220,6 @@ namespace USG_Tools.Core.Managers
     }
 }
 
-
 ==================================================
 ФАЙЛ: USG_Tools.Core\Managers\DiscoveryManager.cs
 ==================================================
@@ -983,7 +1233,19 @@ using USG_Tools.Core.Parsers;
 
 namespace USG_Tools.Core.Managers
 {
+    /// <summary>
+    /// Представляет сырые текстовые данные, полученные от конкретного узла (межсетевого экрана).
+    /// </summary>
+    /// <param name="Host">IP-адрес или имя хоста.</param>
+    /// <param name="Zones">Сырой текст вывода команды просмотра зон безопасности.</param>
+    /// <param name="Routes">Сырой текст вывода таблицы маршрутизации.</param>
     public record HostDiscoveryResult(string Host, string Zones, string Routes);
+
+    /// <summary>
+    /// Главный оркестратор процесса сбора данных (Discovery).
+    /// Отвечает за координацию подключения к устройствам, парсинг сырых данных, 
+    /// обогащение их правилами из конфигурации и передачу на сохранение в базу данных.
+    /// </summary>
     public class DiscoveryManager
     {
         private readonly ConfigManager _configManager;
@@ -997,6 +1259,12 @@ namespace USG_Tools.Core.Managers
 
         private USGManager usg;
 
+        /// <summary>
+        /// Инициализирует новый экземпляр класса <see cref="DiscoveryManager"/>.
+        /// </summary>
+        /// <param name="configManager">Менеджер конфигурации для получения учетных данных и правил маппинга.</param>
+        /// <param name="loggerFactory">Фабрика логгеров для создания логгеров внутренних компонентов.</param>
+        /// <exception cref="ArgumentNullException">Выбрасывается, если фабрика логгеров или учетные данные не инициализированы.</exception>
         public DiscoveryManager(ConfigManager configManager, ILoggerFactory loggerFactory)
         {
             // Проверка на null
@@ -1006,6 +1274,18 @@ namespace USG_Tools.Core.Managers
             _logger = _loggerFactory.CreateLogger<DiscoveryManager>();
         }
 
+        /// <summary>
+        /// Запускает полный цикл обновления базы данных.
+        /// </summary>
+        /// <remarks>
+        /// Процесс включает:
+        /// 1. Параллельный сбор сырых данных со всех устройств из конфигурации.
+        /// 2. Парсинг текста в объекты C#.
+        /// 3. Склейку маршрутов с зонами и маппинг групп In/Out из JSON.
+        /// 4. Удаление дубликатов (схлопывание по сети и зоне).
+        /// 5. Транзакционную перезапись таблицы в базе данных SQLite.
+        /// </remarks>
+        /// <returns>Асинхронная задача.</returns>
         public async Task UpdateDatabase()
         {
             // 1. Загружаем конфиг один раз
@@ -1050,7 +1330,13 @@ namespace USG_Tools.Core.Managers
                 _logger.LogWarning("Нет данных для сохранения в БД.");
             }
         }
-        private async Task<List<HostDiscoveryResult>> GetRoutesAndZonesAsync() 
+
+        /// <summary>
+        /// Асинхронно и параллельно подключается ко всем устройствам из конфигурации
+        /// для сбора таблиц маршрутизации и зон безопасности.
+        /// </summary>
+        /// <returns>Возвращает <see cref="List{T}"/> объектов <see cref="HostDiscoveryResult"/> с сырыми данными опрошенных узлов.</returns>
+        private async Task<List<HostDiscoveryResult>> GetRoutesAndZonesAsync()
         {
             var hostlist = _userCredentials.Hosts;
 
@@ -1077,7 +1363,7 @@ namespace USG_Tools.Core.Managers
 
                     _logger.LogInformation($"[DONE] {host}: Файл записан.");
 
-                    return new HostDiscoveryResult(host,zonesRaw,routesRaw);
+                    return new HostDiscoveryResult(host, zonesRaw, routesRaw);
                 }
                 catch (Exception ex)
                 {
@@ -1097,6 +1383,14 @@ namespace USG_Tools.Core.Managers
             return finalData;
         }
 
+        /// <summary>
+        /// Сопоставляет спарсенные маршруты и зоны по имени интерфейса, 
+        /// а также обогащает их родительскими группами (In/Out) из конфигурации JSON.
+        /// </summary>
+        /// <param name="routes">Список маршрутов, полученных от парсера.</param>
+        /// <param name="zones">Список зон безопасности, полученных от парсера.</param>
+        /// <param name="zoneConfigs">Словарь правил маппинга зон, загруженный из конфигурационного файла.</param>
+        /// <returns>Готовый к записи в БД список объектов <see cref="FinalRoute"/>.</returns>
         private static List<FinalRoute> PrepareDatabaseEntries(
             List<RouteEntry> routes,
             List<ZoneEntry> zones,
@@ -1129,6 +1423,14 @@ namespace USG_Tools.Core.Managers
             }).ToList();
         }
 
+        /// <summary>
+        /// Сохраняет сырые ответы от устройства в текстовый файл для аудита или отладки.
+        /// </summary>
+        /// <param name="host">Имя или IP-адрес узла.</param>
+        /// <param name="zones">Сырой текст ответа для зон.</param>
+        /// <param name="routes">Сырой текст ответа для маршрутов.</param>
+        /// <returns>Асинхронная задача сохранения файла.</returns>
+        /// <remarks>Файлы сохраняются в директорию <c>Output/YYYY-MM-DD/IP_Адрес.txt</c>.</remarks>
         private async Task SaveDataToFileAsync(string host, string zones, string routes)
         {
             try
@@ -1161,6 +1463,462 @@ namespace USG_Tools.Core.Managers
     }
 }
 
+==================================================
+ФАЙЛ: USG_Tools.Core\Managers\RulesManager.cs
+==================================================
+
+﻿using ClosedXML.Excel;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Text;
+using USG_Tools.Core.Helpers;
+using USG_Tools.Core.Models;
+using USG_Tools.Core.Parsers;
+
+namespace USG_Tools.Core.Managers
+{
+    public class RulesManager
+    {
+        private ILoggerFactory _loggerFactory;
+        private ILogger _logger;
+        private USGManager _manager;
+        private static readonly HashSet<IPAddress> ExclusionStarts = new HashSet<IPAddress>
+{
+    IPAddress.Parse("0.0.0.0"),
+    IPAddress.Parse("10.0.0.0"),
+    IPAddress.Parse("10.1.0.0"),
+    IPAddress.Parse("10.2.0.0"),
+    IPAddress.Parse("10.4.0.0"),
+    IPAddress.Parse("10.5.0.0"),
+    IPAddress.Parse("10.6.0.0"),
+    IPAddress.Parse("10.7.0.0"),
+    IPAddress.Parse("10.192.0.0"),
+    IPAddress.Parse("10.193.0.0")
+    // Адреса, которые исключаем из поиска 
+};
+        // Список зон-источников, для которых всегда формируются правила OUT
+        private static readonly HashSet<string> OutSourceZones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "TEMP_CORE_AUP",
+            "TEMP_CORE_KSPD",
+            "KSPD_Protected",
+            "HQ1"
+        };
+
+        public RulesManager(USGManager manager, ILoggerFactory loggerFactory)
+        {
+            _manager = manager;
+            _loggerFactory = loggerFactory;
+            _logger = _loggerFactory.CreateLogger<RulesManager>();
+        }
+
+        public async Task RunMigrationWorkFlow()
+        {
+            _logger.LogInformation("Начат сбор отчета для миграции");
+            List<IpMigration> ipMigrations = ExcelParser.ReadMigrationIp("AddressBook.xlsx", "Migration");
+
+            foreach (var ipMigration in ipMigrations)
+            {
+                _logger.LogDebug(ipMigration.ToString());
+            }
+
+            _logger.LogInformation($"Прочитано {ipMigrations.Count} записей миграции IP");
+
+            _logger.LogInformation($"Начата выгрузка конфигурации с оборудования 10.7.219.11 ");
+
+            await _manager.Connect("10.7.219.11");
+            await _manager.UndoScreenLength();
+            await _manager.GoToSystemView();
+            await _manager.SwitchVsysInside();
+            string fullconfig = await _manager.GetInsideCurrentConfig();
+            List<FirewallRule> rules = USGParser.ParseSecurityPolicies(fullconfig);
+            List<MatchedRule> rulesToMigrate = FindRulesToMigrate(rules, ipMigrations);
+            _logger.LogInformation($"Найдено {rulesToMigrate.Count} правил, содержащих IP-адреса для миграции.");
+            string outputExcelFile = "Migrated_rules.xlsx";
+            ExportMigrationPlanToExcel(rulesToMigrate, outputExcelFile);
+            _logger.LogInformation($"Отчет успешно сохранён в файл : {outputExcelFile}");
+
+        }
+        /// <summary>
+        /// Поиск правил с вхождением необходимых IP Адресов
+        /// Проверяет каждое правило на вхождение Old IP с учетом настроенных фильтров
+        /// </summary>
+        /// <param name="rules">Список правил для поиска</param>
+        /// <param name="ipMigrations">Список IP для миграции </param>
+        /// <returns>List<MatchedRule>></returns>
+        private List<MatchedRule> FindRulesToMigrate(List<FirewallRule> rules, List<IpMigration> ipMigrations)
+        {
+            var rulesToMigrate = new List<MatchedRule>();
+            var validMigrations = ipMigrations.Where(m => m.OldIp != null).ToList();
+
+            foreach (var rule in rules)
+            {
+                var currentRuleMatch = new MatchedRule { Rule = rule };
+
+                foreach (var migration in validMigrations)
+                {
+                    // --- ПРОВЕРКА SOURCE ---
+                    // Ищем диапазон в Source, который содержит IP и НЕ является исключением
+                    var sMatch = rule.SourceAddressRange
+                        .FirstOrDefault(r => r != null &&
+                                             !ExclusionStarts.Contains(r.RangeStart) &&
+                                             r.ContainsIp(migration.OldIp));
+
+                    if (sMatch != null)
+                    {
+                        // Проверяем на дубликат внутри правила (один IP может быть в нескольких диапазонах)
+                        if (!currentRuleMatch.Matches.Any(m => m.MigrationData.OldIp.Equals(migration.OldIp) && m.Direction == "Source"))
+                        {
+                            currentRuleMatch.Matches.Add(new IpMatchResult
+                            {
+                                MigrationData = migration,
+                                Direction = "Source",
+                                MatchedByRange = sMatch.ToString()
+                            });
+                        }
+                    }
+
+                    // --- ПРОВЕРКА DESTINATION ---
+                    var dMatch = rule.DestinationAddressRange
+                        .FirstOrDefault(r => r != null &&
+                                             !ExclusionStarts.Contains(r.RangeStart) && // Логика исключений здесь
+                                             r.ContainsIp(migration.OldIp));
+
+                    if (dMatch != null)
+                    {
+                        if (!currentRuleMatch.Matches.Any(m => m.MigrationData.OldIp.Equals(migration.OldIp) && m.Direction == "Destination"))
+                        {
+                            currentRuleMatch.Matches.Add(new IpMatchResult
+                            {
+                                MigrationData = migration,
+                                Direction = "Destination",
+                                MatchedByRange = dMatch.ToString()
+                            });
+                        }
+                    }
+                }
+
+                if (currentRuleMatch.Matches.Count > 0)
+                {
+                    rulesToMigrate.Add(currentRuleMatch);
+                }
+            }
+            return rulesToMigrate;
+        }
+        private void ExportMigrationPlanToExcel(List<MatchedRule> rules, string outputPath)
+        {
+            var fullCliConfig = new System.Text.StringBuilder();
+
+            using (var workbook = new XLWorkbook())
+            {
+                var worksheet = workbook.Worksheets.Add("План Миграции");
+                string[] headers = {
+                    "Изменения",
+                    "Правило до изменений",
+                    "Найденные IP",
+                    "Добавленные IP",
+                    "Диагностика: Зона (Старая -> Новая)",
+                    "Диагностика: Направление",
+                    "Диагностика: Триггер (Matched By)"
+                };
+
+                for (int i = 0; i < headers.Length; i++)
+                {
+                    worksheet.Cell(1, i + 1).Value = headers[i];
+                    worksheet.Cell(1, i + 1).Style.Font.Bold = true;
+                }
+
+                int rowNum = 2;
+                foreach (var matchedRule in rules)
+                {
+                    // 1. Формируем список уникальных ЗАПИСЕЙ для всего правила
+                    var uniqueRecords = matchedRule.Matches
+                        .GroupBy(m => new
+                        {
+                            Old = m.MigrationData.OldIp?.ToString(),
+                            New = m.MigrationData.NewIp?.ToString(),
+                            OldZ = m.MigrationData.OldZone,
+                            NewZ = m.MigrationData.NewZone,
+                            Dir = m.Direction,
+                            Matched = m.MatchedByRange
+                        })
+                        .Select(g => g.First())
+                        .ToList();
+
+                    // 2. Раскладываем синхронизированные списки
+                    var oldIps = uniqueRecords.Select(m => m.MigrationData.OldIp?.ToString() ?? "").ToList();
+                    var newIps = uniqueRecords.Select(m => m.MigrationData.NewIp?.ToString() ?? "").ToList();
+                    var zones = uniqueRecords.Select(m => $"{m.MigrationData.OldZone ?? "-"} -> {m.MigrationData.NewZone ?? "-"}").ToList();
+                    var directions = uniqueRecords.Select(m => m.Direction ?? "").ToList();
+                    var matchedBys = uniqueRecords.Select(m => m.MatchedByRange ?? "").ToList();
+
+                    // 3. ГЕНЕРАЦИЯ ЛИСТИНГА (ИЗМЕНЕНИЙ) В ОДНУ ЯЧЕЙКУ
+                    string generatedListing = GenerateMigrationCommands(matchedRule);
+
+                    // --- Сохраняем полный конфиг для текстового файла ---
+                    fullCliConfig.AppendLine($"! --- ИЗМЕНЕНИЯ ДЛЯ ПРАВИЛА: {matchedRule.Rule.Name} ---");
+                    fullCliConfig.AppendLine(generatedListing);
+                    fullCliConfig.AppendLine();
+
+                    // --- ЗАЩИТА ОТ ПАДЕНИЯ EXCEL (Лимит 32 767 символов) ---
+                    const int ExcelCellLimit = 32000;
+                    string excelListing = generatedListing;
+                    if (excelListing.Length > ExcelCellLimit)
+                    {
+                        // Выводим яркое предупреждение в консоль
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine($"[ВНИМАНИЕ] Превышен лимит символов Excel для правила '{matchedRule.Rule.Name}'.");
+                        Console.WriteLine($"           Ячейка в строке {rowNum} будет обрезана! Полный конфиг ищите в TXT-файле.");
+                        Console.ResetColor();
+
+                        excelListing = excelListing.Substring(0, ExcelCellLimit) +
+                            "\n\n... [ВНИМАНИЕ: ТЕКСТ ОБРЕЗАН!] ...\n" +
+                            $"... [ПРЕВЫШЕН ЛИМИТ СИМВОЛОВ EXCEL ДЛЯ ПРАВИЛА {matchedRule.Rule.Name}] ...\n" +
+                            "... [ПОЛНЫЙ КОНФИГ ДЛЯ ЭТОГО ПРАВИЛА СМОТРИТЕ В TXT-ФАЙЛЕ] ...";
+                    }
+                    // 4. ЗАПИСЬ В EXCEL
+                    worksheet.Cell(rowNum, 1).Value = excelListing; // Пишем безопасную (обрезанную) строку
+                    worksheet.Cell(rowNum, 2).Value = matchedRule.Rule.FullRule ?? "";
+
+                    worksheet.Cell(rowNum, 3).Value = string.Join("\n", oldIps);
+                    worksheet.Cell(rowNum, 4).Value = string.Join("\n", newIps);
+                    worksheet.Cell(rowNum, 5).Value = string.Join("\n", zones);
+                    worksheet.Cell(rowNum, 6).Value = string.Join("\n", directions);
+                    worksheet.Cell(rowNum, 7).Value = string.Join("\n", matchedBys);
+
+                    // Выравнивание по верхнему краю и перенос текста
+                    worksheet.Row(rowNum).Style.Alignment.WrapText = true;
+                    worksheet.Row(rowNum).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
+
+                    rowNum++;
+                }
+
+                worksheet.Column(1).Width = 55;
+                worksheet.Column(2).Width = 60;
+                worksheet.Column(3).Width = 15;
+                worksheet.Column(4).Width = 15;
+                worksheet.Column(5).Width = 35;
+                worksheet.Columns(6, 7).AdjustToContents();
+
+                workbook.SaveAs(outputPath);
+            }
+
+            // --- НОВОВВЕДЕНИЕ: Сохраняем текстовый файл рядом с Excel ---
+            string txtOutputPath = outputPath.Replace(".xlsx", "_CLI.txt");
+            System.IO.File.WriteAllText(txtOutputPath, fullCliConfig.ToString());
+            Console.WriteLine($"[ИНФО] Полный CLI-конфиг для вставки на файрвол сохранен в: {txtOutputPath}");
+        }
+
+        private string GenerateMigrationCommands(MatchedRule matchedRule)
+        {
+            var listingLines = new List<string>();
+            var ruleName = matchedRule.Rule.Name;
+
+            var existingRuleSourceIps = new List<string>();
+            var existingRuleDestIps = new List<string>();
+            var newRulesByZone = new Dictionary<string, (List<string> SourceIps, List<string> DestIps)>();
+
+            // Список для сбора логов аудита по Корзине 1
+            var auditMessages = new List<string>();
+
+            var globalNewSourceIps = matchedRule.Matches.Where(m => m.Direction == "Source").Select(m => m.MigrationData.NewIp?.ToString()).Where(ip => !string.IsNullOrEmpty(ip)).Distinct().ToList();
+            var globalNewDestIps = matchedRule.Matches.Where(m => m.Direction == "Destination").Select(m => m.MigrationData.NewIp?.ToString()).Where(ip => !string.IsNullOrEmpty(ip)).Distinct().ToList();
+            var globalNewSourceZones = matchedRule.Matches.Where(m => m.Direction == "Source").Select(m => m.MigrationData.NewZone).Where(z => !string.IsNullOrEmpty(z)).Distinct().ToList();
+            var globalNewDestZones = matchedRule.Matches.Where(m => m.Direction == "Destination").Select(m => m.MigrationData.NewZone).Where(z => !string.IsNullOrEmpty(z)).Distinct().ToList();
+
+            // 1. Сортируем хосты
+            foreach (var match in matchedRule.Matches)
+            {
+                string newZone = match.MigrationData.NewZone ?? "";
+                string newIp = match.MigrationData.NewIp?.ToString() ?? "";
+
+                if (string.IsNullOrWhiteSpace(newIp) || string.IsNullOrWhiteSpace(newZone)) continue;
+
+                if (match.Direction == "Source")
+                {
+                    // Проверка: Станет ли Source IP внутризонным в старом правиле?
+                    bool isIntraExisting = matchedRule.Rule.DestinationZone.Count == 1 &&
+                                           matchedRule.Rule.DestinationZone[0].Equals(newZone, StringComparison.OrdinalIgnoreCase);
+
+                    if (matchedRule.Rule.SourceZone.Count == 0 || matchedRule.Rule.SourceZone.Contains(newZone, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (isIntraExisting)
+                            auditMessages.Add($"[АУДИТ] ПРОПУСК: Source IP ({newIp}) становится внутризонным ({newZone} -> {newZone}). Добавление в старое правило отменено.");
+                        else
+                            existingRuleSourceIps.Add(newIp);
+                    }
+                    else
+                    {
+                        if (!newRulesByZone.ContainsKey(newZone)) newRulesByZone[newZone] = (new List<string>(), new List<string>());
+                        newRulesByZone[newZone].SourceIps.Add(newIp);
+                    }
+                }
+                else if (match.Direction == "Destination")
+                {
+                    // Проверка: Станет ли Dest IP внутризонным в старом правиле?
+                    bool isIntraExisting = matchedRule.Rule.SourceZone.Count == 1 &&
+                                           matchedRule.Rule.SourceZone[0].Equals(newZone, StringComparison.OrdinalIgnoreCase);
+
+                    if (matchedRule.Rule.DestinationZone.Count == 0 || matchedRule.Rule.DestinationZone.Contains(newZone, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (isIntraExisting)
+                            auditMessages.Add($"[АУДИТ] ПРОПУСК: Destination IP ({newIp}) становится внутризонным ({newZone} -> {newZone}). Добавление в старое правило отменено.");
+                        else
+                            existingRuleDestIps.Add(newIp);
+                    }
+                    else
+                    {
+                        if (!newRulesByZone.ContainsKey(newZone)) newRulesByZone[newZone] = (new List<string>(), new List<string>());
+                        newRulesByZone[newZone].DestIps.Add(newIp);
+                    }
+                }
+            }
+
+            // 2. Команды для СУЩЕСТВУЮЩЕГО правила
+            if (existingRuleSourceIps.Any() || existingRuleDestIps.Any())
+            {
+                listingLines.Add($"rule name {ruleName}");
+                AppendAddressLines(listingLines, existingRuleSourceIps, "source-address");
+                AppendAddressLines(listingLines, existingRuleDestIps, "destination-address");
+                listingLines.Add(""); // Разделитель
+            }
+
+            // Выводим логи аудита, если какие-то IP были отброшены
+            if (auditMessages.Any())
+            {
+                listingLines.AddRange(auditMessages.Distinct());
+                listingLines.Add(""); // Разделитель
+            }
+
+            // 3. Команды для НОВЫХ правил
+            foreach (var kvp in newRulesByZone)
+            {
+                string targetZone = kvp.Key;
+                var sourceIps = kvp.Value.SourceIps;
+                var destIps = kvp.Value.DestIps;
+
+                var finalSourceZones = sourceIps.Any() ? new List<string> { targetZone } :
+                                       (globalNewSourceZones.Any() ? globalNewSourceZones : matchedRule.Rule.SourceZone.Where(z => !string.IsNullOrWhiteSpace(z)).ToList());
+
+                var finalDestZones = destIps.Any() ? new List<string> { targetZone } :
+                                     (globalNewDestZones.Any() ? globalNewDestZones : matchedRule.Rule.DestinationZone.Where(z => !string.IsNullOrWhiteSpace(z)).ToList());
+
+                bool isIntraZone = finalSourceZones.Count == 1 && finalDestZones.Count == 1 && finalSourceZones[0].Equals(finalDestZones[0], StringComparison.OrdinalIgnoreCase);
+                if (isIntraZone)
+                {
+                    listingLines.Add($"[АУДИТ] ПРОПУСК: Трафик нового правила становится внутризонным ({finalSourceZones[0]} -> {finalDestZones[0]}). Правило не требуется.");
+                    listingLines.Add("");
+                    continue;
+                }
+
+                bool isOutRule = finalSourceZones.Any(z => OutSourceZones.Contains(z));
+                string direction = isOutRule ? "OUT" : "IN";
+                string namingZone = isOutRule ? (finalDestZones.FirstOrDefault() ?? targetZone) : targetZone;
+
+                string newRuleName = $"{namingZone}_{direction}_X";
+                string newParentGroup = $"{namingZone}_{direction}";
+
+                listingLines.Add($"rule name {newRuleName}");
+                listingLines.Add($"    parent-group {newParentGroup}");
+
+                if (!string.IsNullOrEmpty(matchedRule.Rule.Description))
+                    listingLines.Add($"    description {matchedRule.Rule.Description}");
+
+                if (isOutRule)
+                {
+                    if (finalDestZones.Any()) foreach (var dz in finalDestZones) listingLines.Add($"    destination-zone {dz}");
+                    else listingLines.Add($"    destination-zone {targetZone}");
+
+                    listingLines.Add($"    destination-zone INTER_DC");
+                }
+                else
+                {
+                    if (finalSourceZones.Any()) foreach (var sz in finalSourceZones) listingLines.Add($"    source-zone {sz}");
+                    else listingLines.Add($"    source-zone {targetZone}");
+                }
+
+                if (sourceIps.Any())
+                {
+                    AppendAddressLines(listingLines, sourceIps, "source-address");
+                }
+                else if (globalNewSourceIps.Any())
+                {
+                    AppendAddressLines(listingLines, globalNewSourceIps, "source-address");
+                }
+                else
+                {
+                    foreach (var origSrc in matchedRule.Rule.SourceAddressRange)
+                        if (origSrc != null) listingLines.Add(FormatOriginalRange("source-address", origSrc));
+                }
+
+                if (destIps.Any())
+                {
+                    AppendAddressLines(listingLines, destIps, "destination-address");
+                }
+                else if (globalNewDestIps.Any())
+                {
+                    AppendAddressLines(listingLines, globalNewDestIps, "destination-address");
+                }
+                else
+                {
+                    foreach (var origDest in matchedRule.Rule.DestinationAddressRange)
+                        if (origDest != null) listingLines.Add(FormatOriginalRange("destination-address", origDest));
+                }
+
+                foreach (var service in matchedRule.Rule.Service)
+                {
+                    if (service != null)
+                    {
+                        if (!string.IsNullOrEmpty(service.ServiceName))
+                            listingLines.Add($"    service {service.ServiceName}");
+                        else if (!string.IsNullOrEmpty(service.Protocol) && service.PortRangeStart.HasValue)
+                        {
+                            if (service.PortRangeStart == service.PortRangeEnd)
+                                listingLines.Add($"    service protocol {service.Protocol} destination-port {service.PortRangeStart}");
+                            else
+                                listingLines.Add($"    service protocol {service.Protocol} destination-port {service.PortRangeStart} to {service.PortRangeEnd}");
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(matchedRule.Rule.Action))
+                    listingLines.Add($"    action {matchedRule.Rule.Action}");
+
+                listingLines.Add("");
+            }
+
+            return string.Join("\n", listingLines).TrimEnd();
+        }
+        private static void AppendAddressLines(List<string> lines, List<string> ips, string addressType)
+        {
+            var distinctIps = ips.Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
+            if (distinctIps.Any())
+            {
+                var ranges = IpHelper.DetectRanges(distinctIps);
+                foreach (var r in ranges)
+                {
+                    if (r.Start.Equals(r.End))
+                        lines.Add($"    {addressType} {r.Start} mask 255.255.255.255");
+                    else
+                        lines.Add($"    {addressType} range {r.Start} {r.End}");
+                }
+            }
+        }
+
+        private static string FormatOriginalRange(string addressType, IpRange range)
+        {
+            if (range.RangeStart.Equals(range.RangeEnd))
+                return $"    {addressType} {range.RangeStart} mask 255.255.255.255";
+            else
+                return $"    {addressType} range {range.RangeStart} {range.RangeEnd}";
+        }
+
+
+    }
+}
+
 
 ==================================================
 ФАЙЛ: USG_Tools.Core\Managers\USGManager.cs
@@ -1169,10 +1927,6 @@ namespace USG_Tools.Core.Managers
 ﻿using Hyondask.SSH;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using USG_Tools.Core.Models;
@@ -1180,15 +1934,22 @@ using USG_Tools.Core.Constants;
 
 namespace USG_Tools.Core.Managers
 {
+    /// <summary>
+    /// Предоставляет методы для подключения и взаимодействия с межсетевым экраном Huawei USG по SSH.
+    /// Отвечает за отправку команд, смену контекста (vsys) и получение сырого текста.
+    /// </summary>
     public class USGManager
     {
         private readonly UserCredentials _userCredentials;
-
         private readonly ILogger<USGManager> _logger;
-
         private SshConnection ssh;
 
-        public USGManager (UserCredentials userCredentials, ILogger<USGManager> logger = null)
+        /// <summary>
+        /// Инициализирует новый экземпляр класса <see cref="USGManager"/>.
+        /// </summary>
+        /// <param name="userCredentials">Учетные данные для авторизации на устройстве и прокси-сервере.</param>
+        /// <param name="logger">Интерфейс для логирования. Если <see langword="null"/>, используется <see cref="NullLogger"/>.</param>
+        public USGManager(UserCredentials userCredentials, ILogger<USGManager> logger = null)
         {
             _userCredentials = userCredentials;
             _logger = logger ?? NullLogger<USGManager>.Instance;
@@ -1196,8 +1957,12 @@ namespace USG_Tools.Core.Managers
             _logger.LogDebug("USGManager инициализирован (используется {LoggerType})", _logger.GetType().Name);
         }
 
-
-
+        /// <summary>
+        /// Устанавливает SSH-соединение с указанным хостом.
+        /// Если в настройках включен JumpHost, маршрутизирует трафик через прокси-сервер.
+        /// </summary>
+        /// <param name="host">IP-адрес или доменное имя межсетевого экрана.</param>
+        /// <returns>Асинхронная задача.</returns>
         public async Task Connect(string host)
         {
             ssh = new SshConnection(host, _userCredentials.Login, _userCredentials.Password);
@@ -1206,29 +1971,61 @@ namespace USG_Tools.Core.Managers
             {
                 ssh.SetProxy(_userCredentials.ProxyHost, _userCredentials.ProxyLogin, _userCredentials.ProxyPassword);
             }
-            ssh.Prompts.Add(PromptPatterns.UserView); // User-view Prompt (">")
-            ssh.Prompts.Add(PromptPatterns.SystemView); // System-view Prompt ("]")
+            ssh.Prompts.Add(PromptPatterns.HuaweiUserView); // User-view Prompt (">")
+            ssh.Prompts.Add(PromptPatterns.HuaweiSystemView); // System-view Prompt ("]")
 
             await ssh.ConnectAsync();
         }
 
+        /// <summary>
+        /// Запрашивает и возвращает таблицу маршрутизации для контекста INSIDE.
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> с сырым выводом маршрутов или <see langword="null"/> в случае ошибки.</returns>
+        /// <remarks>
+        /// Команда на устройстве включает фильтрацию (exclude) хостовых маршрутов (/32), 
+        /// специфичных интерфейсов и маршрута по умолчанию (0.0.0.0/0) для уменьшения объема данных.
+        /// </remarks>
         public async Task<string> GetInsideRoutes()
         {
+            _logger.LogInformation("Скачивание маршрутов INSIDE");
             return await ExecuteCommandInVsysAsync("display ip routing-table | exclude ([0-9\\.]\\/32|[0-9\\.]\\/30|Eth.*\\.400|NULL0|0\\.0\\.0\\.0\\/0|Virtual\\-if)", TimeSpan.FromSeconds(20));
         }
 
+        /// <summary>
+        /// Запрашивает и возвращает список конфигураций зон безопасности для контекста INSIDE.
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> с сырым выводом конфигурации зон или <see langword="null"/> в случае ошибки.</returns>
         public async Task<string> GetInsideZones()
         {
+            _logger.LogInformation("Скачивание Зон INSIDE");
             return await ExecuteCommandInVsysAsync("display zone", TimeSpan.FromSeconds(30));
         }
 
-        // Вспомогательный метод, чтобы не дублировать проверки во всех Get... методах
+        /// <summary>
+        /// Скачивает полную текущую конфигурацию (display current-configuration) для контекста INSIDE.
+        /// Выкачивание полного конфига за один раз позволяет локально парсить любые блоки (security-policy, address-set, zones),
+        /// не создавая лишней нагрузки на SSH-сессию.
+        /// </summary>
+        /// <returns>Возвращает <see cref="string"/> с сырым текстом полной конфигурации или <see langword="null"/> в случае ошибки.</returns>
+        public async Task<string> GetInsideCurrentConfig()
+        {
+            _logger.LogInformation("Скачивание конфигурации INSIDE");
+            // Используем таймаут в 60 секунд, так как полная конфигурация с тысячами правил может выводиться долго
+            return await ExecuteCommandInVsysAsync("display current-configuration", TimeSpan.FromSeconds(60));
+        }
+
+        /// <summary>
+        /// Вспомогательный метод для выполнения команд строго внутри контекста INSIDE.
+        /// </summary>
+        /// <param name="command">Команда для выполнения на устройстве.</param>
+        /// <param name="timeout">Максимальное время ожидания ответа.</param>
+        /// <returns>Текст ответа устройства или <see langword="null"/>, если устройство не в нужном контексте.</returns>
         private async Task<string> ExecuteCommandInVsysAsync(string command, TimeSpan timeout)
         {
             if (!ssh.IsConnected) return null;
 
             // Проверяем, что мы именно в INSIDE (чтобы не выполнить команду в чужом контексте)
-            if (await CheckPromptAsync(PromptPatterns.InsideVsys))
+            if (await CheckPromptAsync(PromptPatterns.HuaweiInsideVsys))
             {
                 // Добавляем перенос строки, иначе команда не уйдет!
                 await ssh.SendDataAsync(command + Environment.NewLine);
@@ -1239,12 +2036,18 @@ namespace USG_Tools.Core.Managers
             return null;
         }
 
+        /// <summary>
+        /// Отключает пагинацию вывода в консоли (постраничный просмотр).
+        /// Позволяет скачивать длинные ответы (например, полную таблицу маршрутизации) единым блоком текста без необходимости отправлять пробелы.
+        /// </summary>
+        /// <returns>Асинхронная задача.</returns>
+        /// <remarks>Команда "screen-len 0 temp" выполняется в режиме User View (">").</remarks>
         public async Task UndoScreenLength()
         {
-            _logger.LogDebug ($"{nameof(UndoScreenLength)}");
-            
+            _logger.LogDebug($"{nameof(UndoScreenLength)}");
+
             bool isConnected = ssh.IsConnected;
-            bool userView = await CheckPromptAsync(PromptPatterns.UserView);
+            bool userView = await CheckPromptAsync(PromptPatterns.HuaweiUserView);
             if (isConnected && userView)
             {
                 await ssh.SendDataAsync("screen-len 0 temp" + Environment.NewLine);
@@ -1254,14 +2057,17 @@ namespace USG_Tools.Core.Managers
             {
                 _logger.LogError($"{nameof(UndoScreenLength)} | Возникла ошибка. isConnected = {isConnected} | userView = {userView}");
             }
-
-
         }
+
+        /// <summary>
+        /// Переводит терминал из режима User View (">") в режим System View ("]").
+        /// </summary>
+        /// <returns>Асинхронная задача.</returns>
         public async Task GoToSystemView()
         {
             _logger.LogDebug($"{nameof(GoToSystemView)}");
             bool isConnected = ssh.IsConnected;
-            bool userView = await CheckPromptAsync(PromptPatterns.UserView);
+            bool userView = await CheckPromptAsync(PromptPatterns.HuaweiUserView);
             if (isConnected && userView)
             {
                 await ssh.SendDataAsync("System-view" + Environment.NewLine);
@@ -1273,11 +2079,16 @@ namespace USG_Tools.Core.Managers
             }
         }
 
+        /// <summary>
+        /// Переключает контекст виртуальной системы на INSIDE.
+        /// Требует, чтобы терминал уже находился в режиме System View ("]").
+        /// </summary>
+        /// <returns>Асинхронная задача.</returns>
         public async Task SwitchVsysInside()
         {
             _logger.LogDebug($"{nameof(SwitchVsysInside)}");
             bool isConnected = ssh.IsConnected;
-            bool systemView = await CheckPromptAsync(PromptPatterns.SystemView);
+            bool systemView = await CheckPromptAsync(PromptPatterns.HuaweiSystemView);
             if (isConnected && systemView)
             {
                 await ssh.SendDataAsync("switch vsys INSIDE");
@@ -1289,6 +2100,12 @@ namespace USG_Tools.Core.Managers
             }
         }
 
+        /// <summary>
+        /// Проверяет, соответствует ли текущее приглашение командной строки (Prompt) заданному регулярному выражению.
+        /// </summary>
+        /// <param name="pattern">Регулярное выражение для поиска (например, из <see cref="PromptPatterns"/>).</param>
+        /// <returns>Возвращает <see langword="true"/>, если текущая строка совпадает с паттерном, иначе <see langword="false"/>.</returns>
+        /// <remarks>Отправляет пустой перенос строки (Enter), чтобы устройство "отрисковало" текущий Prompt.</remarks>
         public async Task<bool> CheckPromptAsync(string pattern)
         {
             await ssh.SendDataAsync(Environment.NewLine);
@@ -1297,7 +2114,6 @@ namespace USG_Tools.Core.Managers
         }
     }
 }
-
 
 ==================================================
 ФАЙЛ: USG_Tools.Core\Models\FinalRoute.cs
@@ -1309,16 +2125,265 @@ using System.Text;
 
 namespace USG_Tools.Core.Models
 {
+    /// <summary>
+    /// Представляет финальную, обогащенную запись маршрута, готовую для сохранения в базу данных SQLite.
+    /// Содержит как данные из таблицы маршрутизации, так и информацию о зонах из JSON-конфигурации.
+    /// </summary>
+    /// <param name="ip_min">Начальный IP-адрес подсети в числовом представлении (uint).</param>
+    /// <param name="ip_max">Конечный IP-адрес подсети в числовом представлении (uint).</param>
+    /// <param name="cidr">Строковое представление подсети с маской (например, "10.1.0.0/16").</param>
+    /// <param name="route">IP-адрес следующего перехода (NextHop) (например, "10.0.8.66").</param>
+    /// <param name="zone">Имя зоны безопасности, которой принадлежит интерфейс (например, "TEMP_CORE_AUP").</param>
+    /// <param name="interface_name">Имя интерфейса, через который доступен маршрут (например, "Eth-Trunk1.3005").</param>
+    /// <param name="zone_in">Родительская группа зоны для входящего трафика (из конфигурации).</param>
+    /// <param name="zone_out">Родительская группа зоны для исходящего трафика (из конфигурации).</param>
     public record FinalRoute(
         uint ip_min,
         uint ip_max,
-        string cidr,     // Например, "10.1.0.0/16"
-        string route,    // NextHop (например, "10.0.8.66")
-        string zone,     // Имя зоны (например, "TEMP_CORE_AUP")
+        string cidr,
+        string route,
+        string zone,
         string interface_name,
         string zone_in,
         string zone_out
     );
+}
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\FirewallRule.cs
+==================================================
+
+﻿using System;
+using System.Net;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace USG_Tools.Core.Models
+{
+    /* Класс модель в котором будут находится правила на USG
+      * 
+      */
+    public class FirewallRule
+    {
+        public string Name { get; set; }
+        public string? Description { get; set; }
+        public string? ParentGroup { get; set; }
+        public List<string?> SourceZone { get; set; } = new List<string?>();
+        public List<string?> DestinationZone { get; set; } = new List<string?>();
+        public List<IpRange?> SourceAddressRange { get; set; } = new List<IpRange?>();
+        public List<IpRange?> DestinationAddressRange { get; set; } = new List<IpRange?>();
+        public List<Serviceport?> Service { get; set; } = new List<Serviceport?>();
+        public string? Action { get; set; }
+
+        public string FullRule { get; set; } // Храним фулл правило
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\IpMatchResult.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    public class IpMatchResult
+    {
+        public IpMigration MigrationData { get; set; }
+        public string Direction { get; set; }
+        public string MatchedByRange { get; set; } // Сюда запишем конкретный range из конфига
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\IpMigration.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Net;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    public class IpMigration
+    {
+        public string SourceNumber { get; set; }
+        public string? OldZone { get; set; }
+        public IPAddress? OldIp { get; set; }
+        public string? NewZone { get; set; }
+        public IPAddress? NewIp { get; set; } = IPAddress.Any;
+        // Константы для форматирования, чтобы легко менять ширину
+        private const int IpColumnWidth = 20;
+        private const int ZoneColumnWidth = 15;
+
+        /// <summary>
+        /// Предоставляет строковое представление объекта IpMigration в формате таблицы 
+        /// с фиксированной шириной столбцов для ровного вывода.
+        /// </summary>
+        /// <returns>Строка с информацией о миграции IP-адресов в ровном табличном стиле.</returns>
+        [SuppressMessage("ReSharper", "NotNullReferenceMemberIsNotInitialized")]
+        public override string ToString()
+        {
+            // 1. Подготовка данных: заменяем null на маркер "-"
+            string oldIpString = OldIp?.ToString() ?? "-";
+            string newIpString = NewIp?.ToString() ?? "-";
+            string zoneString = string.IsNullOrWhiteSpace(OldZone) ? "-" : OldZone;
+
+            // 2. Сборка строки с использованием string.Format()
+            // {0,-20} : 0-й аргумент, выровнен по левому краю (-), ширина 20.
+            string formatString = $"| {{0,-{IpColumnWidth}}} | {{1,-{IpColumnWidth}}} | {{2,-{ZoneColumnWidth}}} |";
+
+            return string.Format(
+                formatString,
+                oldIpString,
+                newIpString,
+                zoneString
+            );
+        }
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\IpRange.cs
+==================================================
+
+﻿using System;
+using System.Net;
+using System.Collections.Generic;
+using System.Text;
+using USG_Tools.Core.Extensions;
+
+namespace USG_Tools.Core.Models
+{
+    /// <summary>
+    /// Класс для представления одного правила диапазона IP-адресов.
+    /// </summary>
+    public class IpRange
+    {
+        public IPAddress RangeStart { get; set; }
+        public IPAddress RangeEnd { get; set; }
+
+        public IpRange()
+        {
+            //RangeStart = IPAddress.Parse("0.0.0.0");
+            //RangeEnd = IPAddress.Parse("255.255.255.255");
+        }
+        /// <summary>
+        /// Конструктор, для добавления одиночного IP адреса 
+        /// </summary>
+        /// <param name="iPAddress"> IP адрес </param>
+        public IpRange(IPAddress iPAddress)
+        {
+            RangeStart = iPAddress;
+            RangeEnd = iPAddress;
+        }
+
+        /// <summary>
+        /// Конструктор для добавления диапазона ип адресов 
+        /// </summary>
+        /// <param name="rangeStart">Начало диапазона IP Адреса </param>
+        /// <param name="rangeEnd">Конец диапазона IP Адреса </param>
+        public IpRange(IPAddress rangeStart, IPAddress rangeEnd)
+        {
+            RangeStart = rangeStart;
+            RangeEnd = rangeEnd;
+        }
+        /// <summary>
+        /// Проверяет, входит ли заданный IP-адрес в этот диапазон.
+        /// </summary>
+        public bool ContainsIp(IPAddress ipToCheck)
+        {
+            if (ipToCheck == null) return false;
+
+            // Вспомогательный класс для сравнения IP-адресов
+            var comparer = new IpAddressRangeComparer();
+
+            // IP должен быть больше или равен началу диапазона
+            bool isGreaterOrEqual = comparer.Compare(ipToCheck, this.RangeStart) >= 0;
+
+            // IP должен быть меньше или равен концу диапазона
+            bool isLessOrEqual = comparer.Compare(ipToCheck, this.RangeEnd) <= 0;
+
+            return isGreaterOrEqual && isLessOrEqual;
+        }
+
+        /// <summary>
+        /// Статический метод для расчета диапазона (Адрес сети и Бродкаст) из IP и Маски.
+        /// </summary>
+        /// <param name="ipAddress">IP-адрес, входящий в сеть.</param>
+        /// <param name="subnetMask">Маска подсети.</param>
+        /// <returns>Новый объект IpRange с адресом сети и бродкастом.</returns>
+        public static IpRange FromCidrMask(IPAddress ipAddress, IPAddress subnetMask)
+        {
+            // 1. Получаем байты
+            byte[] ipBytes = ipAddress.GetAddressBytes();
+            byte[] maskBytes = subnetMask.GetAddressBytes();
+
+            // Массив байтов для адреса сети и бродкаста
+            byte[] networkBytes = new byte[ipBytes.Length];
+            byte[] broadcastBytes = new byte[ipBytes.Length];
+
+            // 2. Побитовые операции
+            for (int i = 0; i < ipBytes.Length; i++)
+            {
+                // Адрес сети (Network Address): IP & Mask
+                networkBytes[i] = (byte)(ipBytes[i] & maskBytes[i]);
+
+                // Широковещательный адрес (Broadcast Address): IP | (~Mask)
+                // ~Mask (Инверсия маски) - это маска хоста. 
+                // Обратите внимание на "~" (побитовое НЕ)
+                broadcastBytes[i] = (byte)(ipBytes[i] | ~maskBytes[i]);
+            }
+
+            // 3. Создаем объекты IPAddress и возвращаем диапазон
+            IPAddress networkAddress = new IPAddress(networkBytes);
+            IPAddress broadcastAddress = new IPAddress(broadcastBytes);
+
+            return new IpRange(networkAddress, broadcastAddress);
+        }
+        public override string ToString()
+        {
+            // Если начало и конец совпадают — это одиночный IP
+            if (RangeStart.Equals(RangeEnd))
+            {
+                return RangeStart.ToString();
+            }
+            // Если разные — это диапазон
+            return $"{RangeStart} - {RangeEnd}";
+        }
+
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\MatchedRule.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    public class MatchedRule
+    {
+        public FirewallRule Rule { get; set; }
+        // Список всех найденных совпадений для этого правила
+        public List<IpMatchResult> Matches { get; set; } = new List<IpMatchResult>();
+
+
+    }
 }
 
 
@@ -1332,6 +2397,18 @@ using System.Text;
 
 namespace USG_Tools.Core.Models
 {
+    /// <summary>
+    /// Представляет сырую запись маршрута, полученную после парсинга текста от устройства.
+    /// </summary>
+    /// <param name="minIp">Начальный IP-адрес назначения в виде числа.</param>
+    /// <param name="maxIp">Конечный IP-адрес назначения в виде числа.</param>
+    /// <param name="Destination">Сеть назначения в строковом формате (например, "10.0.0.0/8").</param>
+    /// <param name="Protocol">Протокол маршрутизации (например, "O_ASE", "Static", "Direct").</param>
+    /// <param name="Preference">Приоритет (Preference) маршрута.</param>
+    /// <param name="Cost">Метрика (Cost) маршрута.</param>
+    /// <param name="Flags">Флаги состояния маршрута (например, "D").</param>
+    /// <param name="NextHop">IP-адрес шлюза (NextHop).</param>
+    /// <param name="Interface">Исходящий интерфейс маршрута.</param>
     public record RouteEntry(
         uint minIp,
         uint maxIp,
@@ -1345,6 +2422,29 @@ namespace USG_Tools.Core.Models
     );
 }
 
+==================================================
+ФАЙЛ: USG_Tools.Core\Models\Serviceport.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace USG_Tools.Core.Models
+{
+    /// <summary>
+    /// Класс-модель для хранения протоколов в правиле
+    /// </summary>
+    public class Serviceport
+    {
+        public string? ServiceName { get; set; }
+        public string? Protocol { get; set; }
+        public int? PortRangeStart { get; set; }
+        public int? PortRangeEnd { get; set; }
+
+    }
+}
+
 
 ==================================================
 ФАЙЛ: USG_Tools.Core\Models\UserCredentials.cs
@@ -1356,36 +2456,59 @@ using System.Collections.Generic;
 using System.Text;
 using USG_Tools.Core.Extensions;
 
-
 namespace USG_Tools.Core.Models
 {
+    /// <summary>
+    /// Хранит профиль пользователя, включая учетные данные для SSH и прокси, 
+    /// а также список целевых хостов для сбора данных.
+    /// Этот класс сериализуется и сохраняется в файл secrets.json.
+    /// </summary>
     public class UserCredentials
     {
+        /// <summary>Логин для подключения к оборудованию Huawei.</summary>
         public string Login { get; set; } = string.Empty;
+
+        /// <summary>Зашифрованный пароль для подключения к оборудованию.</summary>
         public string Password { get; set; } = string.Empty;
+
+        /// <summary>Указывает, требуется ли использование прокси-сервера (JumpHost) для подключения.</summary>
         public bool JumpHost { get; set; } = false;
+
+        /// <summary>Список IP-адресов целевых устройств (Huawei USG) для опроса.</summary>
         public List<string> Hosts { get; set; } = new List<string>();
+
+        /// <summary>IP-адрес или доменное имя прокси-сервера (заполняется, если <see cref="JumpHost"/> = <see langword="true"/>).</summary>
         public string? ProxyHost { get; set; }
+
+        /// <summary>Логин для авторизации на прокси-сервере.</summary>
         public string? ProxyLogin { get; set; }
+
+        /// <summary>Зашифрованный пароль для авторизации на прокси-сервере.</summary>
         public string? ProxyPassword { get; set; }
 
         private ILogger _logger;
 
+        /// <summary>
+        /// Инициализирует пустой экземпляр <see cref="UserCredentials"/> (необходимо для десериализации JSON).
+        /// </summary>
         public UserCredentials()
         {
-
         }
 
-
-        public bool IsValid (out string errorMessage)
+        /// <summary>
+        /// Проверяет заполненность всех необходимых полей для успешного старта приложения.
+        /// </summary>
+        /// <param name="errorMessage">Возвращает строку с описанием ошибки, если валидация не пройдена, иначе пустую строку.</param>
+        /// <returns>Возвращает <see langword="true"/>, если данные валидны и готовы к использованию, иначе <see langword="false"/>.</returns>
+        public bool IsValid(out string errorMessage)
         {
             // Проверка наличия основных данных (Логин и пароль)
-            if (string.IsNullOrEmpty (Login) || string.IsNullOrEmpty (Password) )
+            if (string.IsNullOrEmpty(Login) || string.IsNullOrEmpty(Password))
             {
                 errorMessage = "Не заполнены основные учетные данные (Логин/Пароль).";
                 return false;
             }
-            
+
             // Проверка наличия хостов для подключения
             if (Hosts == null || Hosts.Count == 0)
             {
@@ -1395,13 +2518,13 @@ namespace USG_Tools.Core.Models
             // Проверка заполненности данных для подключения к прокси 
             if (JumpHost)
             {
-                if (string.IsNullOrWhiteSpace(ProxyHost) || 
-                    string.IsNullOrWhiteSpace (ProxyLogin) ||
-                    string.IsNullOrWhiteSpace(ProxyPassword) ) 
-                    {
+                if (string.IsNullOrWhiteSpace(ProxyHost) ||
+                    string.IsNullOrWhiteSpace(ProxyLogin) ||
+                    string.IsNullOrWhiteSpace(ProxyPassword))
+                {
                     errorMessage = "Включен прокси, но данные прокси-сервера заполнены не полностью.";
                     return false;
-                    }
+                }
 
             }
             //Все проверки выполнены, возвращаем true 
@@ -1410,9 +2533,10 @@ namespace USG_Tools.Core.Models
         }
 
         /// <summary>
-        /// Форматированный вывод свойств класса  
+        /// Формирует безопасное строковое представление профиля пользователя, 
+        /// скрывая чувствительные данные (пароли) с помощью маскирования.
         /// </summary>
-        /// <returns></returns>
+        /// <returns>Многострочная <see cref="string"/> с настройками профиля.</returns>
         public string ToString()
         {
             var sb = new StringBuilder();
@@ -1433,7 +2557,6 @@ namespace USG_Tools.Core.Models
     }
 }
 
-
 ==================================================
 ФАЙЛ: USG_Tools.Core\Models\ZoneEntry.cs
 ==================================================
@@ -1444,9 +2567,13 @@ using System.Text;
 
 namespace USG_Tools.Core.Models
 {
+    /// <summary>
+    /// Представляет конфигурацию зоны безопасности, спарсенную с устройства.
+    /// </summary>
+    /// <param name="Name">Имя зоны безопасности (например, "TEMP_CORE_AUP").</param>
+    /// <param name="Interfaces">Список имен интерфейсов, привязанных к данной зоне.</param>
     public record ZoneEntry(string Name, List<string> Interfaces);
 }
-
 
 ==================================================
 ФАЙЛ: USG_Tools.Core\Models\ZoneMapping.cs
@@ -1458,10 +2585,292 @@ using System.Text;
 
 namespace USG_Tools.Core.Models
 {
+    /// <summary>
+    /// Представляет конфигурацию правил из файла zone_mappings.json, 
+    /// которая используется для обогащения зон родительскими группами.
+    /// </summary>
     public class ZoneMapping
     {
+        /// <summary>Имя группы или правила для входящего трафика зоны.</summary>
         public string In { get; set; }
+
+        /// <summary>Имя группы или правила для исходящего трафика зоны.</summary>
         public string Out { get; set; }
+    }
+}
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Parsers\ExcelIpParser.cs
+==================================================
+
+﻿using ClosedXML;
+using ClosedXML.Excel;
+using DocumentFormat.OpenXml.Spreadsheet;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using USG_Tools.Core.Models;
+
+namespace USG_Tools.Core.Parsers
+{
+    public class ExcelParser
+    {
+
+        // Регулярное выражение для поиска IPv4-адресов.
+        private static readonly string IpV4RegexPattern = @"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b";
+        private static readonly Regex IpV4Regex = new Regex(IpV4RegexPattern, RegexOptions.Compiled);
+
+        /// <summary>
+        /// Считывает список IP-адресов для миграции из файла Excel,
+        /// создавая перекрестные пары OldIp/NewIp.
+        /// </summary>
+        /// <param name="filepath">Путь к файлу Excel.</param>
+        /// <returns>Список объектов IpMigration.</returns>
+        public static List<IpMigration> ReadMigrationIp(string filepath, string sheetName = "Миграция")
+        {
+            var ipList = new List<IpMigration>();
+            List<string> errorList = new List<string>();
+
+            using ( var workbook = new XLWorkbook(filepath))
+            {
+                // Ищем вкладку по имени. Если не нашли — выбрасываем исключение или берем первую.
+                if (!workbook.Worksheets.TryGetWorksheet(sheetName, out var worksheet))
+                {
+                    throw new Exception($"Вкладка '{sheetName}' не найдена в файле {filepath}");
+                }
+                var range = worksheet.RangeUsed();
+
+                if (range == null || range.RowCount() <= 1)
+                {
+                    Console.WriteLine("Файл Excel пуст или содержит только заголовок.");
+                    return ipList;
+                }
+
+                foreach (var row in range.RowsUsed().Skip(1))
+                {
+                    string number = row.Cell(1).GetString();
+                    string oldZone = row.Cell(4).GetString();
+                    string oldIpCellContent = row.Cell(5).GetString();
+                    string newIpCellContent = row.Cell(6).GetString();
+                    string newZone = row.Cell(7).GetString();
+
+                    List<string> foundOldIps = FindAllIpV4Addresses(oldIpCellContent);
+                    List<string> foundNewIps = FindAllIpV4Addresses(newIpCellContent);
+
+                    // 1. Проверка на наличие данных
+                    if (!foundOldIps.Any()) errorList.Add($"В поле под номером {number} отсутствует Old IP.");
+                    if (!foundNewIps.Any()) errorList.Add($"В поле под номером {number} отсутствует New IP.");
+
+                    if (!foundOldIps.Any() || !foundNewIps.Any()) errorList.Add($"В поле под номером {number} отсутствуют IP ") ; 
+
+                    foreach (string oldIpString in foundOldIps)
+                    {
+                        if (!IPAddress.TryParse(oldIpString, out IPAddress? oldIp)) continue;
+
+                        // 2. Проверка: Old IP должен быть в сети 10.0.0.0/8
+                        if (!IsInternalTenEight(oldIp))
+                        {
+                            errorList.Add($"В поле под номером {number} адрес Old IP ({oldIpString}) является внешним. Разрешена только сеть 10.0.0.0/8");
+                        }
+
+                        foreach (string newIpString in foundNewIps)
+                        {
+                            if (!IPAddress.TryParse(newIpString, out IPAddress? newIp)) continue;
+
+                            // 2. Проверка: New IP должен быть в сети 10.0.0.0/8
+                            if (!IsInternalTenEight(newIp))
+                            {
+                                errorList.Add($"В поле под номером {number} адрес New IP ({newIpString}) является внешним. Разрешена только сеть 10.0.0.0/8");
+                            }
+
+                            ipList.Add(new IpMigration
+                            {
+                                NewZone = newZone,
+                                NewIp = newIp,
+                                OldIp = oldIp,
+                                OldZone = oldZone,
+                                SourceNumber = number
+                            });
+                        }
+                    }
+                }
+            }
+
+            // 3. Удаление дубликатов
+            // Группируем по OldIp и NewIp и берем по одному первому вхождению из каждой группы
+            var uniqueIpList = ipList
+                .GroupBy(x => new { Old = x.OldIp?.ToString(), New = x.NewIp?.ToString() })
+                .Select(g => g.First())
+                .ToList();
+
+            // Выводим в консоль сообщение о том, что дубликаты были удалены
+            int removedCount = ipList.Count - uniqueIpList.Count;
+            if (removedCount > 0)
+            {
+                Console.WriteLine($"[Инфо] Удалено дубликатов: {removedCount}");
+            }
+
+            // 4. Итоговый вывод (теперь только критические ошибки валидации IP)
+            //if (errorList.Any())
+            //{
+              Console.WriteLine("--- ОШИБКИ ВАЛИДАЦИИ СЕТЕЙ ---");
+              errorList.Distinct().ToList().ForEach(e => Console.WriteLine($"- {e}"));
+              //return new List<IpMigration>();
+            //}
+
+            return uniqueIpList;
+        }
+
+        // Вспомогательный метод для проверки сети 10.0.0.0/8
+        private static bool IsInternalTenEight(IPAddress ip)
+        {
+            byte[] bytes = ip.GetAddressBytes();
+            return bytes.Length == 4 && bytes[0] == 10;
+        }
+
+        /// <summary>
+        /// Ищет все валидные IPv4-адреса в строке с помощью регулярного выражения.
+        /// </summary>
+        /// <param name="text">Строка для анализа (содержимое ячейки).</param>
+        /// <returns>Список найденных валидных IP-адресов в виде строк.</returns>
+        private static List<string> FindAllIpV4Addresses(string text)
+        {
+            // Если входная строка пуста, сразу возвращаем пустой список.
+            if (string.IsNullOrEmpty(text))
+            {
+                return new List<string>();
+            }
+
+            var matches = IpV4Regex.Matches(text);
+            var ipAddresses = new List<string>();
+
+            foreach (Match match in matches)
+            {
+                // Используем TryParse для окончательной валидации IP-адреса (например, отбрасываем 999.999.999.999)
+                if (IPAddress.TryParse(match.Value, out _))
+                {
+                    ipAddresses.Add(match.Value);
+                }
+            }
+
+            return ipAddresses;
+        }
+
+    }
+}
+
+
+==================================================
+ФАЙЛ: USG_Tools.Core\Parsers\FirewallRuleParser.cs
+==================================================
+
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Net;
+using USG_Tools.Core.Models;
+using Microsoft.VisualBasic;
+
+namespace USG_Tools.Core.Parsers
+{
+    public class FirewallRuleParser
+    {
+        public FirewallRule ParseRule (string rule)
+        {
+            FirewallRule firewallRule = new FirewallRule() { FullRule = rule};
+            var splitrule = rule.Split("\r\n");
+            foreach (string raw in splitrule)
+            {
+                string cleanraw = raw.Trim();
+                if (cleanraw.Contains("rule name")) firewallRule.Name = cleanraw.Split(' ')[2];
+                if (cleanraw.Contains("parent-group")) firewallRule.ParentGroup = cleanraw.Split(' ')[1];
+                if (cleanraw.Contains("description")) firewallRule.Description = cleanraw.Split(' ')[1];
+                if (cleanraw.Contains("source-zone")) firewallRule.SourceZone.Add(cleanraw.Split(' ')[1]);
+                if (cleanraw.Contains("destination-zone")) firewallRule.DestinationZone.Add(cleanraw.Split(' ')[1]);
+                if (cleanraw.Contains("source-address")) firewallRule.SourceAddressRange.Add(ExtractIp(cleanraw));
+                if (cleanraw.Contains("destination-address")) firewallRule.DestinationAddressRange.Add(ExtractIp(cleanraw));
+                if (cleanraw.Contains("service")) firewallRule.Service.Add(ExtractService(cleanraw));
+                if (cleanraw.Contains("action")) firewallRule.Action = cleanraw.Split(' ')[1];
+            }
+                    return firewallRule;
+        }
+
+        private Serviceport ExtractService (string raw)
+        {
+            Serviceport service = new Serviceport();
+            var words = raw.Split(' ');
+            if (words.Length >= 5) // Если указывается конкретный порт или диапазон, то сохраняем Прим: service protocol tcp destination-port 10050 ( to 10051 )
+            {
+                service.Protocol = words[2];
+                service.PortRangeStart = int.Parse(words[4]);
+                if (words.Length == 7)
+                {
+                    service.PortRangeEnd = int.Parse(words[6]);
+                }
+                else service.PortRangeEnd = service.PortRangeStart;
+
+
+            }
+            if (words.Length ==2 ) // Прим: service https_https Сохраняем в Service только название сервиса в ServiceName
+            {
+                service.ServiceName = words[1]; 
+            }
+            return service;
+        }
+        private IpRange ExtractIp(string raw)
+        {
+            // Объявляем переменную в начале, чтобы она была доступна для возврата
+            IpRange iprange = null;
+
+            // Используем самый безопасный способ разбиения на слова
+            var words = raw.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (raw.Contains("range") && words.Length == 4)
+            {
+                // Парсинг формата '... range StartIP EndIP'
+                // Предполагаем, что StartIP и EndIP находятся под индексами 2 и 3
+                IPAddress start = IPAddress.Parse(words[2]);
+                IPAddress end = IPAddress.Parse(words[3]);
+
+                iprange = new IpRange(start, end);
+            }
+            else if (raw.Contains("mask") && words.Length == 4)
+            {
+                // Парсинг формата '... IPAddress mask SubnetMask'
+
+                // 1. Извлекаем IP-адрес и Маску
+                // В вашем примере: words[1] = "10.1.0.0", words[3] = "255.255.0.0"
+                IPAddress ip = IPAddress.Parse(words[1]);
+                IPAddress mask = IPAddress.Parse(words[3]);
+
+                // 2. Используем статический метод для расчета диапазона
+                iprange = IpRange.FromCidrMask(ip, mask);
+            }
+
+            // Если ни одно условие не сработало, iprange останется null.
+            // Нужно решить, что возвращать в этом случае (null или, например, одиночный IP-адрес)
+            if (iprange == null)
+            {
+                // Опционально: Если это строка с адресом, но без маски/range, берем одиночный IP
+                if (words.Length >= 2 && IPAddress.TryParse(words[1], out IPAddress singleIp))
+                {
+                    iprange = new IpRange(singleIp);
+                }
+                else
+                {
+                    // Если не удалось ничего найти, возвращаем null (или выбрасываем исключение)
+                    return null;
+                }
+            }
+
+            return iprange;
+        }
     }
 }
 
@@ -1488,11 +2897,48 @@ namespace USG_Tools.Core.Parsers
 
         // Паттерн для зон (учитывает description и другие поля между именем и интерфейсами)
         private static readonly Regex ZoneRegex = new Regex(
-            // Изменения: 
-            // 1. Убрали лишние \s перед и после приоритета.
-            // 2. interfaces теперь захватывает всё до ПЕРВОГО встречного символа #
             @"vpn-instance\s+\S+\s+(?<zoneName>\S+)[\s\S]*?interface\s+of\s+the\s+zone\s+is\s+\(\d+\):\s*(?<interfaces>[^#]*?)\s*(?=#)",
             RegexOptions.Compiled);
+
+        // Регулярка для вырезания блока политик 
+        // RegexOptions.Singleline позволяет точке (.) захватывать переносы строк
+        private static readonly Regex SecurityPolicyBlockRegex = new Regex(
+            @"^security-policy\r?\n(.+?)(?:^#|^auth-policy)",
+            RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.Singleline);
+
+        /// <summary>
+        /// Парсит сырой лог полного конфига и возвращает список объектов FirewallRule.
+        /// </summary>
+        public static List<FirewallRule> ParseSecurityPolicies(string fullConfig)
+        {
+            var rulesList = new List<FirewallRule>();
+
+            // 1. Вырезаем только блок политик
+            var match = SecurityPolicyBlockRegex.Match(fullConfig);
+            if (!match.Success)
+            {
+                // Если блока политик нет, возвращаем пустой список
+                return rulesList;
+            }
+
+            string policyBlock = match.Groups[1].Value;
+
+            // 2. Бьем текст блока на отдельные правила 
+            // Исключаем пустые элементы
+            var rawRules = Regex.Split(policyBlock, @"(?=rule name)")
+                                .Where(r => !string.IsNullOrWhiteSpace(r))
+                                .ToList();
+
+            // 3. Парсим каждое правило
+            var ruleParser = new FirewallRuleParser(); 
+            foreach (var rawRule in rawRules)
+            {
+                // ruleParser сам найдет source, destination, action и т.д.
+                rulesList.Add(ruleParser.ParseRule(rawRule));
+            }
+
+            return rulesList;
+        }
 
         public static List<RouteEntry> ParseRoutes(string rawData)
         {
@@ -1532,7 +2978,7 @@ namespace USG_Tools.Core.Parsers
                 string name = match.Groups["zoneName"].Value.Trim();
                 string rawInterfaces = match.Groups["interfaces"].Value;
 
-                // ВРЕМЕННО для отладки: посмотри в консоль, что там внутри
+                // ВРЕМЕННО для отладки: 
                 //Console.WriteLine($"Zone: {name}, Raw content: [{rawInterfaces}]");
 
                 var interfaceList = rawInterfaces

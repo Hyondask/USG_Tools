@@ -81,6 +81,7 @@ namespace USG_Tools.Core.Managers
         /// <returns></returns>
         public Dictionary<string, ZoneMapping> LoadZoneMappings()
         {
+            _logger.LogInformation("Чтение маппинга Зон");
             string path = Path.Combine(_zonemappingFilePath);
             if (!File.Exists(path))
             {

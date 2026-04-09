@@ -14,6 +14,7 @@ namespace USG_Tools.CLI
         private readonly ILogger _logger;
         private readonly ILoggerFactory _loggerFactory;
         private string _lastErrorMessage;
+        private readonly string filename = "AddressBook.xlsx";
         public Menu(ConfigManager configManager, ILoggerFactory loggerFactory)
         {
             // Проверка на null
@@ -46,7 +47,9 @@ namespace USG_Tools.CLI
                 Console.WriteLine("========================================");
                 Console.WriteLine("        HUAWEI USG HELPER TOOL          ");
                 Console.WriteLine("========================================");
-                Console.WriteLine("2. Поиск зоны по IP адресу");
+                Console.WriteLine("1. Проверка наличия доступа");
+                Console.WriteLine("2. Демонтаж доступа");
+                Console.WriteLine("3. Миграция правил (На основе Excel)");
                 Console.WriteLine("8. Настройки (Credentials/Proxy)");
                 Console.WriteLine("9. Обновление БД");
                 Console.WriteLine("0. Выход");
@@ -55,6 +58,8 @@ namespace USG_Tools.CLI
 
                 switch (Console.ReadLine())
                 {
+                    case "2": await RunTeardown(); break;
+                    case "3": await RunMigration(); break;
                     case "8": await RunSetup(); break;
                     case "9": await ShowDiscoveryMenu(); break;
                     case "0": return;
@@ -64,6 +69,27 @@ namespace USG_Tools.CLI
                         break;
                 }
             }
+        }
+
+        private async Task RunTeardown()
+        {
+            RulesManager manager = new RulesManager(new USGManager(_configManager.Credentials, _loggerFactory.CreateLogger<USGManager>()), _loggerFactory);
+            await manager.RunTeardownWorkFlow();
+            Console.WriteLine("Для продолжения нажмите Enter...");
+            Console.ReadLine();
+        }
+
+        /// <summary>
+        /// Сбор правил для отчета миграции серверов в новые подсети
+        /// </summary>
+        /// <returns></returns>
+        /// 
+        private async Task RunMigration()
+        {
+            RulesManager manager = new RulesManager(new USGManager(_configManager.Credentials, _loggerFactory.CreateLogger<USGManager>()), _loggerFactory);
+            await manager.RunMigrationWorkFlow();
+            Console.WriteLine("Для продолжения нажмите Enter...");
+            Console.ReadLine();
         }
 
         /// <summary>
@@ -79,8 +105,8 @@ namespace USG_Tools.CLI
             var discovery = new DiscoveryManager(_configManager, _loggerFactory);
             await discovery.UpdateDatabase();
 
-            Console.WriteLine("\nНажмите любую клавишу для возврата...");
-            Console.ReadKey();
+            Console.WriteLine("Для продолжения нажмите Enter...");
+            Console.ReadLine();
         }   
 
 

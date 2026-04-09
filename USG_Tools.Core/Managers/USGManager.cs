@@ -1,10 +1,6 @@
 ﻿using Hyondask.SSH;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using USG_Tools.Core.Models;
@@ -21,6 +17,7 @@ namespace USG_Tools.Core.Managers
         private readonly UserCredentials _userCredentials;
         private readonly ILogger<USGManager> _logger;
         private SshConnection ssh;
+        private string Host;
 
         /// <summary>
         /// Инициализирует новый экземпляр класса <see cref="USGManager"/>.
@@ -43,14 +40,16 @@ namespace USG_Tools.Core.Managers
         /// <returns>Асинхронная задача.</returns>
         public async Task Connect(string host)
         {
+            Host = host;
+            _logger.LogInformation($"Подключение к хосту {host}");
             ssh = new SshConnection(host, _userCredentials.Login, _userCredentials.Password);
 
             if (_userCredentials.JumpHost)
             {
                 ssh.SetProxy(_userCredentials.ProxyHost, _userCredentials.ProxyLogin, _userCredentials.ProxyPassword);
             }
-            ssh.Prompts.Add(PromptPatterns.UserView); // User-view Prompt (">")
-            ssh.Prompts.Add(PromptPatterns.SystemView); // System-view Prompt ("]")
+            ssh.Prompts.Add(PromptPatterns.HuaweiUserView); // User-view Prompt (">")
+            ssh.Prompts.Add(PromptPatterns.HuaweiSystemView); // System-view Prompt ("]")
 
             await ssh.ConnectAsync();
         }
@@ -65,7 +64,7 @@ namespace USG_Tools.Core.Managers
         /// </remarks>
         public async Task<string> GetInsideRoutes()
         {
-            _logger.LogInformation("Скачивание маршрутов");
+            _logger.LogInformation($" {Host} | Скачивание маршрутов INSIDE");
             return await ExecuteCommandInVsysAsync("display ip routing-table | exclude ([0-9\\.]\\/32|[0-9\\.]\\/30|Eth.*\\.400|NULL0|0\\.0\\.0\\.0\\/0|Virtual\\-if)", TimeSpan.FromSeconds(20));
         }
 
@@ -75,7 +74,7 @@ namespace USG_Tools.Core.Managers
         /// <returns>Возвращает <see cref="string"/> с сырым выводом конфигурации зон или <see langword="null"/> в случае ошибки.</returns>
         public async Task<string> GetInsideZones()
         {
-            _logger.LogInformation("Скачивание Зон");
+            _logger.LogInformation($" {Host} | Скачивание Зон INSIDE");
             return await ExecuteCommandInVsysAsync("display zone", TimeSpan.FromSeconds(30));
         }
 
@@ -87,7 +86,7 @@ namespace USG_Tools.Core.Managers
         /// <returns>Возвращает <see cref="string"/> с сырым текстом полной конфигурации или <see langword="null"/> в случае ошибки.</returns>
         public async Task<string> GetInsideCurrentConfig()
         {
-            _logger.LogInformation("Скачивание конфигурации INSIDE");
+            _logger.LogInformation($" {Host} | Скачивание конфигурации INSIDE");
             // Используем таймаут в 60 секунд, так как полная конфигурация с тысячами правил может выводиться долго
             return await ExecuteCommandInVsysAsync("display current-configuration", TimeSpan.FromSeconds(60));
         }
@@ -103,14 +102,14 @@ namespace USG_Tools.Core.Managers
             if (!ssh.IsConnected) return null;
 
             // Проверяем, что мы именно в INSIDE (чтобы не выполнить команду в чужом контексте)
-            if (await CheckPromptAsync(PromptPatterns.InsideVsys))
+            if (await CheckPromptAsync(PromptPatterns.HuaweiInsideVsys))
             {
                 // Добавляем перенос строки, иначе команда не уйдет!
                 await ssh.SendDataAsync(command + Environment.NewLine);
                 return await ssh.ReadDataAsync(timeout);
             }
 
-            _logger.LogError($"Ошибка выполнения '{command}': устройство не в режиме INSIDE.");
+            _logger.LogError($" {Host} | Ошибка выполнения '{command}': устройство не в режиме INSIDE.");
             return null;
         }
 
@@ -125,7 +124,7 @@ namespace USG_Tools.Core.Managers
             _logger.LogDebug($"{nameof(UndoScreenLength)}");
 
             bool isConnected = ssh.IsConnected;
-            bool userView = await CheckPromptAsync(PromptPatterns.UserView);
+            bool userView = await CheckPromptAsync(PromptPatterns.HuaweiUserView);
             if (isConnected && userView)
             {
                 await ssh.SendDataAsync("screen-len 0 temp" + Environment.NewLine);
@@ -145,7 +144,7 @@ namespace USG_Tools.Core.Managers
         {
             _logger.LogDebug($"{nameof(GoToSystemView)}");
             bool isConnected = ssh.IsConnected;
-            bool userView = await CheckPromptAsync(PromptPatterns.UserView);
+            bool userView = await CheckPromptAsync(PromptPatterns.HuaweiUserView);
             if (isConnected && userView)
             {
                 await ssh.SendDataAsync("System-view" + Environment.NewLine);
@@ -166,7 +165,7 @@ namespace USG_Tools.Core.Managers
         {
             _logger.LogDebug($"{nameof(SwitchVsysInside)}");
             bool isConnected = ssh.IsConnected;
-            bool systemView = await CheckPromptAsync(PromptPatterns.SystemView);
+            bool systemView = await CheckPromptAsync(PromptPatterns.HuaweiSystemView);
             if (isConnected && systemView)
             {
                 await ssh.SendDataAsync("switch vsys INSIDE");

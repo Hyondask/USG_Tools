@@ -14,11 +14,13 @@ namespace USG_Tools.Core.Models
         public IPAddress RangeStart { get; set; }
         public IPAddress RangeEnd { get; set; }
 
-        public IpRange()
-        {
-            //RangeStart = IPAddress.Parse("0.0.0.0");
-            //RangeEnd = IPAddress.Parse("255.255.255.255");
-        }
+        //public string RawString { get; set; }
+
+        //public IpRange()
+        //{
+        //    //RangeStart = IPAddress.Parse("0.0.0.0");
+        //    //RangeEnd = IPAddress.Parse("255.255.255.255");
+        //}
         /// <summary>
         /// Конструктор, для добавления одиночного IP адреса 
         /// </summary>

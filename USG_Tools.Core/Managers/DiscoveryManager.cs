@@ -31,7 +31,6 @@ namespace USG_Tools.Core.Managers
         private List<RouteEntry> routes = new List<RouteEntry>();
         private List<ZoneEntry> zones = new List<ZoneEntry>();
 
-        private USGManager usg;
 
         /// <summary>
         /// Инициализирует новый экземпляр класса <see cref="DiscoveryManager"/>.
