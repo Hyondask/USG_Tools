@@ -31,6 +31,11 @@ namespace USG_Tools.Core.Managers
     IPAddress.Parse("10.193.0.0")
     // Адреса, которые исключаем из поиска 
 };
+        private readonly List<string> _excludedSetNames = new List<string>()
+        {
+            "BSS_DRT_PROD_10.193.96.0/22"
+        };
+
         // Список зон-источников, для которых всегда формируются правила OUT
         private static readonly HashSet<string> OutSourceZones = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -98,40 +103,44 @@ namespace USG_Tools.Core.Managers
         /// </summary>
         private List<MatchedAddressSet> FindAddressSetsToMigrate(List<AddressSet> allSets, List<IpMigration> ipMigrations)
         {
-            // Предполагаю, что у тебя есть класс MatchedAddressSet по аналогии с MatchedRule
             var setsToMigrate = new List<MatchedAddressSet>();
             var validMigrations = ipMigrations.Where(m => m.OldIp != null).ToList();
 
-            // =================================================================
-            // 1. БЫСТРАЯ ФИЛЬТРАЦИЯ (Используем UsgSearchEngine)
-            // =================================================================
             var oldIpsToSearch = validMigrations.Select(m => m.OldIp);
             var affectedSets = UsgSearchEngine.FindAddressSetsByIps(oldIpsToSearch, allSets);
 
-            // =================================================================
-            // 2. ТОЧЕЧНЫЙ ПОИСК (Бизнес-логика)
-            // Идем ТОЛЬКО по задетым сетам
-            // =================================================================
             foreach (var set in affectedSets)
             {
+                // =========================================================
+                // ФИЛЬТР 1: ФИЛЬТРАЦИЯ ПО ИМЕНИ ADDRESS-SET
+                // Если имя сета содержит любое слово из списка исключений — пропускаем его
+                // =========================================================
+                if (_excludedSetNames.Any(ex => set.Name.Contains(ex, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
                 var currentSetMatch = new MatchedAddressSet { AddressSet = set };
 
                 foreach (var migration in validMigrations)
                 {
-                    // Ищем конкретный IpRange внутри словаря Address текущего сета
-                    // (Предполагаю, что в сетах логики исключений Any/0.0.0.0 обычно нет, 
-                    // но если есть — можешь добавить !ExclusionStarts.Contains)
-                    var match = set.Address.Values.FirstOrDefault(r => r != null && r.ContainsIp(migration.OldIp));
+                    // =========================================================
+                    // ФИЛЬТР 2: ФИЛЬТРАЦИЯ ПО МАСКЕ /24
+                    // =========================================================
+                    var match = set.Address.Values.FirstOrDefault(r =>
+                        r != null &&
+                        r.ContainsIp(migration.OldIp) &&
+                        IsMaskValid(r) // Вызываем наш новый метод проверки маски
+                    );
 
                     if (match != null)
                     {
-                        // Проверяем на дубликаты
                         if (!currentSetMatch.Matches.Any(m => m.MigrationData.OldIp.Equals(migration.OldIp)))
                         {
                             currentSetMatch.Matches.Add(new IpMatchResult
                             {
                                 MigrationData = migration,
-                                Direction = "AddressSet", // Помечаем, что нашли в самом сете
+                                Direction = "AddressSet",
                                 MatchedByRange = match.ToString()
                             });
                         }
@@ -742,5 +751,38 @@ namespace USG_Tools.Core.Managers
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Проверяет размер диапазона. Возвращает true, если сеть равна /24 (256 адресов) или меньше (до /32).
+        /// Возвращает false, если сеть крупнее (например /23, /16, Any).
+        /// </summary>
+        private bool IsMaskValid(IpRange range)
+        {
+            if (range?.RangeStart == null || range?.RangeEnd == null)
+                return false;
+
+            byte[] startBytes = range.RangeStart.GetAddressBytes();
+            byte[] endBytes = range.RangeEnd.GetAddressBytes();
+
+            // Если это вдруг IPv6, пропускаем математику для IPv4 (или можешь вернуть false, если у вас только IPv4)
+            if (startBytes.Length != 4 || endBytes.Length != 4)
+                return true;
+
+            // C# BitConverter зависит от архитектуры процессора, поэтому переворачиваем байты при необходимости
+            if (BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(startBytes);
+                Array.Reverse(endBytes);
+            }
+
+            // Переводим IP-адреса в обычные числа
+            uint startInt = BitConverter.ToUInt32(startBytes, 0);
+            uint endInt = BitConverter.ToUInt32(endBytes, 0);
+
+            // Считаем количество адресов (Конец - Начало + 1)
+            long ipCount = (long)endInt - (long)startInt + 1;
+
+            // Если адресов 256 или меньше — это маска /24 и меньше. Нам подходит!
+            return ipCount <= 256;
+        }
     }
 }
