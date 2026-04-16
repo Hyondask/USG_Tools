@@ -104,5 +104,41 @@ namespace USG_Tools.Core.Managers
                 throw;
             }
         }
+        /// <summary>
+        /// Ищет наиболее точный маршрут (Longest Prefix Match) для указанного IP-адреса.
+        /// </summary>
+        /// <param name="targetIp">IP-адрес для поиска.</param>
+        /// <returns>Объект маршрута или null, если маршрут не найден.</returns>
+        public async Task<FinalRoute?> GetRouteByIpAsync(System.Net.IPAddress targetIp)
+        {
+            // 1. Переводим IP-адрес в число (long) для сравнения в БД
+            byte[] bytes = targetIp.GetAddressBytes();
+            if (BitConverter.IsLittleEndian)
+            {
+                Array.Reverse(bytes);
+            }
+            long ipAsInt = BitConverter.ToUInt32(bytes, 0);
+
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            // 2. SQL запрос
+            // Сортировка ORDER BY (ip_max - ip_min) ASC гарантирует, 
+            // что мы возьмем самую узкую подсеть (наиболее точный маршрут).
+            const string sql = @"
+                SELECT 
+                    ip_min, ip_max, cidr, route, zone, 
+                    interface_name, zone_in, zone_out
+                FROM Routes 
+                WHERE @IpAsInt BETWEEN ip_min AND ip_max
+                ORDER BY (ip_max - ip_min) ASC
+                LIMIT 1;";
+
+            // 3. Собираем объект в FinalRoute с помощью Dapper
+            var matchedRoute = await connection.QueryFirstOrDefaultAsync<FinalRoute>(sql, new { IpAsInt = ipAsInt });
+
+            return matchedRoute;
+        }
+
     }
 }

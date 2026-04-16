@@ -17,8 +17,8 @@ namespace USG_Tools.Core.Models
     /// <param name="zone_in">Родительская группа зоны для входящего трафика (из конфигурации).</param>
     /// <param name="zone_out">Родительская группа зоны для исходящего трафика (из конфигурации).</param>
     public record FinalRoute(
-        uint ip_min,
-        uint ip_max,
+        long ip_min,
+        long ip_max,
         string cidr,
         string route,
         string zone,

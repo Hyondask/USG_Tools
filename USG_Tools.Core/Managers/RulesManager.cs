@@ -17,6 +17,7 @@ namespace USG_Tools.Core.Managers
         private ILoggerFactory _loggerFactory;
         private ILogger _logger;
         private USGManager _manager;
+        private DatabaseManager _databaseManager;
         private static readonly HashSet<IPAddress> ExclusionStarts = new HashSet<IPAddress>
 {
     IPAddress.Parse("0.0.0.0"),
@@ -50,6 +51,7 @@ namespace USG_Tools.Core.Managers
             _manager = manager;
             _loggerFactory = loggerFactory;
             _logger = _loggerFactory.CreateLogger<RulesManager>();
+            _databaseManager = new DatabaseManager("zone_ip.sqlite", _loggerFactory.CreateLogger<DatabaseManager>());
         }
         /// <summary>
         /// Запуск процесса демонтажа правил
@@ -70,6 +72,9 @@ namespace USG_Tools.Core.Managers
             _logger.LogInformation("Начат сбор отчета для миграции");
             List<IpMigration> ipMigrations = await Task.Run(() => ExcelParser.ReadMigrationIp("AddressBook.xlsx", "Миграция"));
 
+            //  Обогащаем зоны (пустые ячейки заполнятся из БД)
+
+            await EnrichZonesAsync(ipMigrations, _databaseManager);
             foreach (var ipMigration in ipMigrations)
             {
                 _logger.LogDebug(ipMigration.ToString());
@@ -85,6 +90,7 @@ namespace USG_Tools.Core.Managers
             await _manager.SwitchVsysInside();
             string fullconfig = await _manager.GetInsideCurrentConfig();
             List<FirewallRule> rules = USGParser.ParseSecurityPolicies(fullconfig);
+            _logger.LogInformation($"На USG найдено {rules.Count} правил");
             List<MatchedRule> rulesToMigrate = FindRulesToMigrate(rules, ipMigrations);
             _logger.LogInformation($"Найдено {rulesToMigrate.Count} правил, содержащих IP-адреса для миграции.");
             _logger.LogInformation($"Начата выгрузка address set с оборудования 10.7.219.11");
@@ -92,11 +98,52 @@ namespace USG_Tools.Core.Managers
             _logger.LogInformation($"{addressSets.Count} addresses");
             var matchedSets = FindAddressSetsToMigrate(addressSets, ipMigrations);
             string outputExcelFile = "Output/Migrated_rules.xlsx";
-            await Task.Run(() =>ExportMigrationPlanToExcel(rulesToMigrate,matchedSets, outputExcelFile));
+            await Task.Run(() =>ExportMigrationPlanToExcel(rulesToMigrate,matchedSets,ipMigrations, outputExcelFile));
             _logger.LogInformation($"Отчет успешно сохранён в файл : {outputExcelFile}");
 
         }
 
+        /// <summary>
+        /// Обогащает список миграций информацией о зонах из базы данных.
+        /// Если зона уже заполнена вручную в Excel, она не перезаписывается.
+        /// </summary>
+        /// <param name="migrations">Список миграций из Excel.</param>
+        /// <param name="dbManager">Экземпляр DatabaseManager для запросов к БД.</param>
+        public async Task EnrichZonesAsync(List<IpMigration> migrations, DatabaseManager dbManager)
+        {
+            foreach (var migration in migrations)
+            {
+                // --- 1. Обогащаем Старую Зону (OldZone) ---
+                if (migration.OldIp != null && string.IsNullOrWhiteSpace(migration.OldZone))
+                {
+                    var oldRouteInfo = await dbManager.GetRouteByIpAsync(migration.OldIp);
+                    if (oldRouteInfo != null)
+                    {
+                        migration.OldZone = oldRouteInfo.zone;
+                    }
+                    else
+                    {
+                        migration.OldZone = "Unknown"; // Или оставь null, если так удобнее для логов
+                    }
+                }
+
+                // --- 2. Обогащаем Новую Зону (NewZone) ---
+                if (migration.NewIp != null && string.IsNullOrWhiteSpace(migration.NewZone))
+                {
+                    var newRouteInfo = await dbManager.GetRouteByIpAsync(migration.NewIp);
+                    if (newRouteInfo != null)
+                    {
+                        migration.NewZone = newRouteInfo.zone;
+                    }
+                    else
+                    {
+                        migration.NewZone = "Unknown";
+                    }
+                }
+            }
+
+            _logger.LogInformation("Данные успешно обогащены зонами из маршрутной БД.");
+        }
 
         /// <summary>
         /// Поиск адрес-сетов для миграции
@@ -342,7 +389,7 @@ namespace USG_Tools.Core.Managers
         // Обновленный вызов в основном коде:
         // await Task.Run(() => ExportMigrationPlanToExcel(rulesToMigrate, matchedSets, outputExcelFile));
 
-        private void ExportMigrationPlanToExcel(List<MatchedRule> rules, List<MatchedAddressSet> addressSets, string outputPath)
+        private void ExportMigrationPlanToExcel(List<MatchedRule> rules, List<MatchedAddressSet> addressSets,List<IpMigration> ipMigrations, string outputPath)
         {
             var fullCliConfig = new System.Text.StringBuilder();
 
@@ -356,6 +403,10 @@ namespace USG_Tools.Core.Managers
                 var setSheet = workbook.Worksheets.Add("Группы (Address Sets)");
                 WriteAddressSetsSheet(setSheet, addressSets);
 
+                // --- ЛИСТ 3: ИСХОДНЫЕ ДАННЫЕ МИГРАЦИИ ---
+                var ipSheet = workbook.Worksheets.Add("План миграции IP");
+                WriteIpMigrationsSheet(ipSheet, ipMigrations);
+
                 workbook.SaveAs(outputPath);
             }
 
@@ -365,6 +416,35 @@ namespace USG_Tools.Core.Managers
             Console.WriteLine($"[ИНФО] Полный CLI-конфиг сохранен в: {txtOutputPath}");
         }
 
+        private void WriteIpMigrationsSheet(IXLWorksheet sheet, List<IpMigration> ipMigrations)
+        {
+            // 1. Создаем заголовки
+            sheet.Cell(1, 1).Value = "Старый IP";
+            sheet.Cell(1, 2).Value = "Новый IP";
+            sheet.Cell(1, 3).Value = "Старая зона (Old Zone)";
+            sheet.Cell(1, 4).Value = "Новая зона (New Zone)";
+
+            // Делаем заголовки жирными и серыми для красоты (опционально)
+            var headerRange = sheet.Range(1, 1, 1, 4);
+            headerRange.Style.Font.Bold = true;
+            headerRange.Style.Fill.BackgroundColor = XLColor.LightGray;
+
+            // 2. Заполняем данными
+            int row = 2;
+            foreach (var migration in ipMigrations)
+            {
+                // Используем ToString() для IPAddress и проверяем на null
+                sheet.Cell(row, 1).Value = migration.OldIp?.ToString() ?? "";
+                sheet.Cell(row, 2).Value = migration.NewIp?.ToString() ?? "";
+                sheet.Cell(row, 3).Value = migration.OldZone ?? "";
+                sheet.Cell(row, 4).Value = migration.NewZone ?? "";
+
+                row++;
+            }
+
+            // 3. Автоматически подгоняем ширину колонок под текст
+            sheet.Columns().AdjustToContents();
+        }
         private void WriteAddressSetsSheet(IXLWorksheet worksheet, List<MatchedAddressSet> addressSets)
         {
             // 1. Добавили "Address-Set до изменений" в массив заголовков
