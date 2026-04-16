@@ -18,6 +18,7 @@ namespace USG_Tools.Core.Managers
         private ILogger _logger;
         private USGManager _manager;
         private DatabaseManager _databaseManager;
+        private readonly int ValidMigrationMask = 16;
         private static readonly HashSet<IPAddress> ExclusionStarts = new HashSet<IPAddress>
 {
     IPAddress.Parse("0.0.0.0"),
@@ -145,6 +146,38 @@ namespace USG_Tools.Core.Managers
             _logger.LogInformation("Данные успешно обогащены зонами из маршрутной БД.");
         }
 
+        private bool IsValidForMigration(IpRange range)
+        {
+            // 1. Если это вообще не CIDR или в строке нет слова "mask", оставляем (считаем валидным).
+            if (string.IsNullOrEmpty(range.RawString) || !range.RawString.Contains("mask"))
+                return true;
+
+            // 2. Вытаскиваем саму маску (то, что идет после слова "mask")
+            // StringSplitOptions.None важен, если "mask" это целое слово
+            string[] parts = range.RawString.Split(new[] { "mask" }, StringSplitOptions.None);
+
+            if (parts.Length == 2)
+            {
+                // Очищаем от лишних пробелов, получаем чистую строку "255.255.255.0"
+                string maskString = parts[1].Trim();
+
+                // 3. Пытаемся превратить строку в настоящий объект IP-адреса
+                if (IPAddress.TryParse(maskString, out IPAddress ipMask))
+                {
+                    // 4. Конвертируем маску в длину префикса (например, 24)
+                    int cidrLength = IpHelper.GetCidrLengthFromMask(ipMask);
+
+                    // 5. Оставляем только те сети, у которых маска 24 и выше (24, 25, 26 ... 32)
+                    // (Чем больше число маски, тем меньше сеть)
+                    return cidrLength > ValidMigrationMask;
+                }
+            }
+
+            // Если что-то пошло не так при парсинге (например, кривая строка в конфиге),
+            // безопаснее вернуть true, чтобы случайно не удалить нужное правило.
+            return true;
+        }
+
         /// <summary>
         /// Поиск адрес-сетов для миграции
         /// </summary>
@@ -188,7 +221,7 @@ namespace USG_Tools.Core.Managers
                             {
                                 MigrationData = migration,
                                 Direction = "AddressSet",
-                                MatchedByRange = match.ToString()
+                                MatchedByRange = match.RawString
                             });
                         }
                     }
@@ -233,10 +266,10 @@ namespace USG_Tools.Core.Managers
                 foreach (var migration in validMigrations)
                 {
                     // --- ПРОВЕРКА SOURCE ---
-                    // Ищем диапазон в Source, который содержит IP и НЕ является исключением
+                    // Ищем диапазон в Source, который содержит IP и является валидным (/32)
                     var sMatch = rule.SourceAddressRange
                         .FirstOrDefault(r => r != null &&
-                                             !ExclusionStarts.Contains(r.RangeStart) &&
+                                             IsValidForMigration(r) &&
                                              r.ContainsIp(migration.OldIp));
 
                     if (sMatch != null)
@@ -248,146 +281,43 @@ namespace USG_Tools.Core.Managers
                             {
                                 MigrationData = migration,
                                 Direction = "Source",
-                                MatchedByRange = sMatch.ToString()
+                                MatchedByRange = sMatch.RawString
                             });
                         }
                     }
 
                     // --- ПРОВЕРКА DESTINATION ---
+                    // Ищем диапазон в Destination, который содержит IP и является валидным (/32)
                     var dMatch = rule.DestinationAddressRange
                         .FirstOrDefault(r => r != null &&
-                                             !ExclusionStarts.Contains(r.RangeStart) && // Логика исключений здесь
+                                             IsValidForMigration(r) &&
                                              r.ContainsIp(migration.OldIp));
 
                     if (dMatch != null)
                     {
+                        // Проверяем на дубликат внутри правила
                         if (!currentRuleMatch.Matches.Any(m => m.MigrationData.OldIp.Equals(migration.OldIp) && m.Direction == "Destination"))
                         {
                             currentRuleMatch.Matches.Add(new IpMatchResult
                             {
                                 MigrationData = migration,
                                 Direction = "Destination",
-                                MatchedByRange = dMatch.ToString()
+                                MatchedByRange = dMatch.RawString
                             });
                         }
                     }
                 }
 
+                // Добавляем правило в итоговый список, только если нашли хотя бы одно совпадение
                 if (currentRuleMatch.Matches.Count > 0)
                 {
                     rulesToMigrate.Add(currentRuleMatch);
                 }
             }
+
             return rulesToMigrate;
         }
 
-
-        //private void ExportMigrationPlanToExcel(List<MatchedRule> rules, string outputPath)
-        //{
-        //    var fullCliConfig = new System.Text.StringBuilder();
-
-        //    using (var workbook = new XLWorkbook())
-        //    {
-        //        var worksheet = workbook.Worksheets.Add("План Миграции");
-        //        string[] headers = {
-        //            "Изменения",
-        //            "Правило до изменений",
-        //            "Найденные IP",
-        //            "Добавленные IP",
-        //            "Диагностика: Зона (Старая -> Новая)",
-        //            "Диагностика: Направление",
-        //            "Диагностика: Триггер (Matched By)"
-        //        };
-
-        //        for (int i = 0; i < headers.Length; i++)
-        //        {
-        //            worksheet.Cell(1, i + 1).Value = headers[i];
-        //            worksheet.Cell(1, i + 1).Style.Font.Bold = true;
-        //        }
-
-        //        int rowNum = 2;
-        //        foreach (var matchedRule in rules)
-        //        {
-        //            // 1. Формируем список уникальных ЗАПИСЕЙ для всего правила
-        //            var uniqueRecords = matchedRule.Matches
-        //                .GroupBy(m => new
-        //                {
-        //                    Old = m.MigrationData.OldIp?.ToString(),
-        //                    New = m.MigrationData.NewIp?.ToString(),
-        //                    OldZ = m.MigrationData.OldZone,
-        //                    NewZ = m.MigrationData.NewZone,
-        //                    Dir = m.Direction,
-        //                    Matched = m.MatchedByRange
-        //                })
-        //                .Select(g => g.First())
-        //                .ToList();
-
-        //            // 2. Раскладываем синхронизированные списки
-        //            var oldIps = uniqueRecords.Select(m => m.MigrationData.OldIp?.ToString() ?? "").ToList();
-        //            var newIps = uniqueRecords.Select(m => m.MigrationData.NewIp?.ToString() ?? "").ToList();
-        //            var zones = uniqueRecords.Select(m => $"{m.MigrationData.OldZone ?? "-"} -> {m.MigrationData.NewZone ?? "-"}").ToList();
-        //            var directions = uniqueRecords.Select(m => m.Direction ?? "").ToList();
-        //            var matchedBys = uniqueRecords.Select(m => m.MatchedByRange ?? "").ToList();
-
-        //            // 3. ГЕНЕРАЦИЯ ЛИСТИНГА (ИЗМЕНЕНИЙ) В ОДНУ ЯЧЕЙКУ
-        //            string generatedListing = GenerateMigrationCommands(matchedRule);
-
-        //            // --- Сохраняем полный конфиг для текстового файла ---
-        //            fullCliConfig.AppendLine($"! --- ИЗМЕНЕНИЯ ДЛЯ ПРАВИЛА: {matchedRule.Rule.Name} ---");
-        //            fullCliConfig.AppendLine(generatedListing);
-        //            fullCliConfig.AppendLine();
-
-        //            // --- ЗАЩИТА ОТ ПАДЕНИЯ EXCEL (Лимит 32 767 символов) ---
-        //            const int ExcelCellLimit = 32000;
-        //            string excelListing = generatedListing;
-        //            if (excelListing.Length > ExcelCellLimit)
-        //            {
-        //                // Выводим яркое предупреждение в консоль
-        //                Console.ForegroundColor = ConsoleColor.Yellow;
-        //                Console.WriteLine($"[ВНИМАНИЕ] Превышен лимит символов Excel для правила '{matchedRule.Rule.Name}'.");
-        //                Console.WriteLine($"           Ячейка в строке {rowNum} будет обрезана! Полный конфиг ищите в TXT-файле.");
-        //                Console.ResetColor();
-
-        //                excelListing = excelListing.Substring(0, ExcelCellLimit) +
-        //                    "\n\n... [ВНИМАНИЕ: ТЕКСТ ОБРЕЗАН!] ...\n" +
-        //                    $"... [ПРЕВЫШЕН ЛИМИТ СИМВОЛОВ EXCEL ДЛЯ ПРАВИЛА {matchedRule.Rule.Name}] ...\n" +
-        //                    "... [ПОЛНЫЙ КОНФИГ ДЛЯ ЭТОГО ПРАВИЛА СМОТРИТЕ В TXT-ФАЙЛЕ] ...";
-        //            }
-        //            // 4. ЗАПИСЬ В EXCEL
-        //            worksheet.Cell(rowNum, 1).Value = excelListing; // Пишем безопасную (обрезанную) строку
-        //            worksheet.Cell(rowNum, 2).Value = matchedRule.Rule.FullRule ?? "";
-
-        //            worksheet.Cell(rowNum, 3).Value = string.Join("\n", oldIps);
-        //            worksheet.Cell(rowNum, 4).Value = string.Join("\n", newIps);
-        //            worksheet.Cell(rowNum, 5).Value = string.Join("\n", zones);
-        //            worksheet.Cell(rowNum, 6).Value = string.Join("\n", directions);
-        //            worksheet.Cell(rowNum, 7).Value = string.Join("\n", matchedBys);
-
-        //            // Выравнивание по верхнему краю и перенос текста
-        //            worksheet.Row(rowNum).Style.Alignment.WrapText = true;
-        //            worksheet.Row(rowNum).Style.Alignment.Vertical = XLAlignmentVerticalValues.Top;
-
-        //            rowNum++;
-        //        }
-
-        //        worksheet.Column(1).Width = 55;
-        //        worksheet.Column(2).Width = 60;
-        //        worksheet.Column(3).Width = 15;
-        //        worksheet.Column(4).Width = 15;
-        //        worksheet.Column(5).Width = 35;
-        //        worksheet.Columns(6, 7).AdjustToContents();
-
-        //        workbook.SaveAs(outputPath);
-        //    }
-
-        //    // --- НОВОВВЕДЕНИЕ: Сохраняем текстовый файл рядом с Excel ---
-        //    string txtOutputPath = outputPath.Replace(".xlsx", "_CLI.txt");
-        //    System.IO.File.WriteAllText(txtOutputPath, fullCliConfig.ToString());
-        //    Console.WriteLine($"[ИНФО] Полный CLI-конфиг для вставки на файрвол сохранен в: {txtOutputPath}");
-        //}
-
-        // Обновленный вызов в основном коде:
-        // await Task.Run(() => ExportMigrationPlanToExcel(rulesToMigrate, matchedSets, outputExcelFile));
 
         private void ExportMigrationPlanToExcel(List<MatchedRule> rules, List<MatchedAddressSet> addressSets,List<IpMigration> ipMigrations, string outputPath)
         {
@@ -595,12 +525,7 @@ namespace USG_Tools.Core.Managers
             }
 
             // --- 3. ФОРМАТИРОВАНИЕ КОЛОНОК ---
-            worksheet.Column(1).Width = 55;
-            worksheet.Column(2).Width = 60;
-            worksheet.Column(3).Width = 15;
-            worksheet.Column(4).Width = 15;
-            worksheet.Column(5).Width = 35;
-            worksheet.Columns(6, 7).AdjustToContents();
+            worksheet.Columns(1, 7).AdjustToContents();
         }
 
         private string GenerateMigrationCommands(MatchedRule matchedRule)
@@ -830,6 +755,7 @@ namespace USG_Tools.Core.Managers
 
             return sb.ToString();
         }
+
 
         /// <summary>
         /// Проверяет размер диапазона. Возвращает true, если сеть равна /24 (256 адресов) или меньше (до /32).

@@ -46,5 +46,32 @@ namespace USG_Tools.Core.Helpers
             if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
             return BitConverter.ToUInt32(bytes, 0);
         }
+        /// <summary>
+        /// Конвертирует строковую маску (например "255.255.255.0") в длину префикса (24).
+        /// </summary>
+        public static int GetCidrLengthFromMask(IPAddress maskAddress)
+        {
+            byte[] maskBytes = maskAddress.GetAddressBytes();
+            int cidr = 0;
+
+            foreach (byte b in maskBytes)
+            {
+                // Считаем количество единиц в битах
+                switch (b)
+                {
+                    case 255: cidr += 8; break;
+                    case 254: cidr += 7; break;
+                    case 252: cidr += 6; break;
+                    case 248: cidr += 5; break;
+                    case 240: cidr += 4; break;
+                    case 224: cidr += 3; break;
+                    case 192: cidr += 2; break;
+                    case 128: cidr += 1; break;
+                    case 0: return cidr;
+                }
+                if (b != 255) break; // Прерываем цикл после первого неполного байта
+            }
+            return cidr;
+        }
     }
 }

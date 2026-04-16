@@ -12,7 +12,7 @@
     "Out": "VIDEO_OUT"
   },
   "TEMP_CORE_AUP": {
-    "In": "TEMP_CORE_AUP",
+    "In": "",
     "Out": ""
   },
   "IC_CP61K_USG": {
@@ -87,6 +87,10 @@
     "In": "MGMT_IN",
     "Out": "MGMT_OUT"
   },
+  "TEMP_CORE_KSPD": {
+    "In": "",
+    "Out": ""
+  },
   "KSPD_PROTECTED": {
     "In": "",
     "Out": ""
@@ -120,6 +124,10 @@
     "Out": "BSS_VDI_OUT"
   },
   "BSS_TEST": {
+    "In": "BSS_TEST_IN",
+    "Out": "BSS_TEST_OUT"
+  },
+  "BSS_IRTS": {
     "In": "BSS_TEST_IN",
     "Out": "BSS_TEST_OUT"
   },

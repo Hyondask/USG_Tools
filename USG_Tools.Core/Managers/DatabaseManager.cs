@@ -97,7 +97,7 @@ namespace USG_Tools.Core.Managers
             }
             catch (Exception ex)
             {
-                // Если что-то пошло не так (например, выключился свет или ошибка в SQL)
+                // Если что-то пошло не так 
                 // Rollback вернет БД в состояние ДО начала очистки.
                 await transaction.RollbackAsync();
                 _logger.LogError($"Ошибка транзакции. БД не была изменена. Детали: {ex.Message}");
@@ -123,8 +123,6 @@ namespace USG_Tools.Core.Managers
             await connection.OpenAsync();
 
             // 2. SQL запрос
-            // Сортировка ORDER BY (ip_max - ip_min) ASC гарантирует, 
-            // что мы возьмем самую узкую подсеть (наиболее точный маршрут).
             const string sql = @"
                 SELECT 
                     ip_min, ip_max, cidr, route, zone, 
@@ -136,6 +134,20 @@ namespace USG_Tools.Core.Managers
 
             // 3. Собираем объект в FinalRoute с помощью Dapper
             var matchedRoute = await connection.QueryFirstOrDefaultAsync<FinalRoute>(sql, new { IpAsInt = ipAsInt });
+
+            // =================================================================
+            // 4. ДЕБАГ
+            // =================================================================
+            if (matchedRoute != null)
+            {
+                // Если ты используешь ILogger, можешь заменить Console.WriteLine на _logger.LogInformation
+                _logger.LogDebug($"[DEBUG] IP: {targetIp,-15} | Сеть: {matchedRoute.cidr,-18} | Зона: {matchedRoute.zone}");
+            }
+            else
+            {
+                _logger.LogDebug($"[DEBUG] IP: {targetIp,-15} | Сеть: НЕ НАЙДЕНА        | Зона: NULL");
+            }
+            // =================================================================
 
             return matchedRoute;
         }

@@ -68,7 +68,10 @@ namespace USG_Tools.Core.Parsers
                 IPAddress start = IPAddress.Parse(words[2]);
                 IPAddress end = IPAddress.Parse(words[3]);
 
-                iprange = new IpRange(start, end);
+                iprange = new IpRange(start, end)
+                {
+                    RawString = raw
+                };
             }
             else if (raw.Contains("mask") && words.Length == 4)
             {
@@ -80,7 +83,7 @@ namespace USG_Tools.Core.Parsers
                 IPAddress mask = IPAddress.Parse(words[3]);
 
                 // 2. Используем статический метод для расчета диапазона
-                iprange = IpRange.FromCidrMask(ip, mask);
+                iprange = IpRange.FromCidrMask(ip, mask, raw);
             }
 
             // Если ни одно условие не сработало, iprange останется null.
@@ -90,7 +93,10 @@ namespace USG_Tools.Core.Parsers
                 // Опционально: Если это строка с адресом, но без маски/range, берем одиночный IP
                 if (words.Length >= 2 && IPAddress.TryParse(words[1], out IPAddress singleIp))
                 {
-                    iprange = new IpRange(singleIp);
+                    iprange = new IpRange(singleIp)
+                    {
+                        RawString = raw
+                    }; ;
                 }
                 else
                 {

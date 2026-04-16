@@ -113,12 +113,12 @@ namespace USG_Tools.Core.Parsers
             }
 
             // 4. Итоговый вывод (теперь только критические ошибки валидации IP)
-            //if (errorList.Any())
-            //{
-            Console.WriteLine("--- ОШИБКИ ВАЛИДАЦИИ СЕТЕЙ ---");
-            errorList.Distinct().ToList().ForEach(e => Console.WriteLine($"- {e}"));
-            //return new List<IpMigration>();
-            //}
+            if (errorList.Any())
+            {
+                Console.WriteLine("--- ОШИБКИ ВАЛИДАЦИИ СЕТЕЙ ---");
+                errorList.Distinct().ToList().ForEach(e => Console.WriteLine($"- {e}"));
+                //return new List<IpMigration>();
+            }
 
             return uniqueIpList;
         }

@@ -14,7 +14,7 @@ namespace USG_Tools.Core.Models
         public IPAddress RangeStart { get; set; }
         public IPAddress RangeEnd { get; set; }
 
-        //public string RawString { get; set; }
+        public string RawString { get; set; } // Запись как строка выглядела в конфиге 
 
         //public IpRange()
         //{
@@ -66,7 +66,7 @@ namespace USG_Tools.Core.Models
         /// <param name="ipAddress">IP-адрес, входящий в сеть.</param>
         /// <param name="subnetMask">Маска подсети.</param>
         /// <returns>Новый объект IpRange с адресом сети и бродкастом.</returns>
-        public static IpRange FromCidrMask(IPAddress ipAddress, IPAddress subnetMask)
+        public static IpRange FromCidrMask(IPAddress ipAddress, IPAddress subnetMask, string rawstring = null)
         {
             // 1. Получаем байты
             byte[] ipBytes = ipAddress.GetAddressBytes();
@@ -92,7 +92,10 @@ namespace USG_Tools.Core.Models
             IPAddress networkAddress = new IPAddress(networkBytes);
             IPAddress broadcastAddress = new IPAddress(broadcastBytes);
 
-            return new IpRange(networkAddress, broadcastAddress);
+            return new IpRange(networkAddress, broadcastAddress)
+            {
+                RawString = rawstring
+            };
         }
         public override string ToString()
         {

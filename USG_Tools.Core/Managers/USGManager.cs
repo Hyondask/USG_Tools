@@ -65,7 +65,7 @@ namespace USG_Tools.Core.Managers
         public async Task<string> GetInsideRoutes()
         {
             _logger.LogInformation($" {Host} | Скачивание маршрутов INSIDE");
-            return await ExecuteCommandInVsysAsync("display ip routing-table | exclude ([0-9\\.]\\/32|[0-9\\.]\\/30|Eth.*\\.400|NULL0|0\\.0\\.0\\.0\\/0|Virtual\\-if)", TimeSpan.FromSeconds(20));
+            return await ExecuteCommandInVsysAsync("display ip routing-table | exclude ([0-9\\.]\\/32|[0-9\\.]\\/30|Eth.*\\.400|NULL0|0\\.0\\.0\\.0\\/0|Virtual\\-if)", TimeSpan.FromSeconds(60));
         }
 
         /// <summary>

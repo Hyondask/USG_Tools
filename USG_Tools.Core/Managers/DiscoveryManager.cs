@@ -117,7 +117,6 @@ namespace USG_Tools.Core.Managers
             {
                 try
                 {
-                    // СОЗДАЕМ ЛОКАЛЬНУЮ ПЕРЕМЕННУЮ, чтобы не было конфликтов между потоками
                     var usg = new USGManager(_userCredentials, _loggerFactory.CreateLogger<USGManager>());
 
                     await usg.Connect(host);
@@ -129,7 +128,30 @@ namespace USG_Tools.Core.Managers
                     string zonesRaw = await usg.GetInsideZones();
                     string routesRaw = await usg.GetInsideRoutes();
 
-                    _logger.LogInformation($"[SUCCESS] {host}: Данные получены.");
+                    // =====================================================================
+                    // ВАЛИДАЦИЯ ПОЛУЧЕННЫХ ДАННЫХ
+                    // =====================================================================
+
+                    // 1. Проверяем зоны
+                    if (string.IsNullOrWhiteSpace(zonesRaw) || !zonesRaw.Contains("vpn-instance"))
+                    {
+                        throw new Exception("Получены некорректные или пустые данные зон (отсутствует 'vpn-instance').");
+                    }
+
+                    // 2. Проверяем маршруты
+                    if (string.IsNullOrWhiteSpace(routesRaw) || !routesRaw.Contains("Destination/Mask"))
+                    {
+                        throw new Exception("Таблица маршрутов не получена или оборвалась (отсутствует заголовок 'Destination/Mask').");
+                    }
+
+                    // Опционально: можно проверять минимальную длину строки
+                    if (routesRaw.Length < 500)
+                    {
+                        throw new Exception($"Подозрительно короткий ответ с маршрутами ({routesRaw.Length} символов). Возможен обрыв.");
+                    }
+                    // =====================================================================
+
+                    _logger.LogInformation($"[SUCCESS] {host}: Данные получены и прошли проверку.");
 
                     // ВЫЗОВ СОХРАНЕНИЯ
                     await SaveDataToFileAsync(host, zonesRaw, routesRaw);
@@ -140,18 +162,19 @@ namespace USG_Tools.Core.Managers
                 }
                 catch (Exception ex)
                 {
+                    // Если сработал наш throw new Exception, он прилетит прямо сюда
                     _logger.LogError($"[FAILED] {host}: {ex.Message}");
                     return null;
                 }
             });
 
-            // Ожидаем получения зон и маршрутов от всех хостов. Формируем массив record
+            // Ожидаем получения зон и маршрутов от всех хостов.
             HostDiscoveryResult?[] results = await Task.WhenAll(tasks);
 
-            // 3. Фильтруем успешные (убираем null) и превращаем в итоговый список
+            // Фильтруем успешные (убираем null) и превращаем в итоговый список
             List<HostDiscoveryResult> finalData = results.Where(r => r != null).Cast<HostDiscoveryResult>().ToList();
 
-            _logger.LogInformation($"Сбор завершен. В списке объектов: {finalData.Count}");
+            _logger.LogInformation($"Сбор завершен. Успешных хостов: {finalData.Count} из {hostlist.Count}");
 
             return finalData;
         }
